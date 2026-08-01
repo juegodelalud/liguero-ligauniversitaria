@@ -117,6 +117,31 @@
   .rate-row{display:flex;gap:10px;margin:10px 0;}
   .rate-btn{flex:1;padding:14px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);font-size:22px;cursor:pointer;text-align:center;}
   .rate-btn.active{border-color:var(--gold);background:var(--gold-soft);}
+
+  /* ================= INSTAGRAM (perfil ficticio del jugador) ================= */
+  .ig-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:16px;}
+  .ig-topbar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);}
+  .ig-topbar b{font-family:'Barlow Condensed';font-size:17px;color:var(--text);}
+  .ig-header{display:flex;gap:16px;padding:18px 16px 8px;align-items:center;}
+  .ig-avatar{width:72px;height:72px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed';font-weight:800;font-size:28px;color:#fff;border:3px solid var(--gold);}
+  .ig-handle{font-weight:700;font-size:15px;color:var(--text);}
+  .ig-name{color:var(--muted);font-size:13px;margin-top:1px;}
+  .ig-stats-row{display:flex;gap:0;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .ig-stat{flex:1;text-align:center;}
+  .ig-stat .n{font-family:'Barlow Condensed';font-weight:800;font-size:20px;color:var(--text);display:block;}
+  .ig-stat .l{font-size:11px;color:var(--muted);}
+  .ig-bio{padding:2px 16px 16px;font-size:13px;color:var(--text);line-height:1.6;}
+  .ig-post{border-top:8px solid var(--surface2);}
+  .ig-post-photo{background:linear-gradient(135deg,var(--navy),var(--navy2));min-height:170px;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;}
+  .ig-post-photo .cap{color:var(--gold);font-family:'Barlow Condensed';font-weight:800;font-size:20px;text-shadow:0 2px 10px rgba(0,0,0,.4);}
+  .ig-actions{display:flex;gap:14px;padding:10px 16px 4px;font-size:19px;}
+  .ig-likes{padding:0 16px 6px;font-weight:700;font-size:13px;color:var(--text);}
+  .ig-caption{padding:0 16px 10px;font-size:13px;color:var(--text);}
+  .ig-caption b{margin-right:6px;}
+  .ig-comments{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;}
+  .ig-comment{font-size:13px;color:var(--text);}
+  .ig-comment b{color:var(--gold-text);margin-right:6px;}
+  .ig-empty{padding:0 16px 16px;font-size:13px;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -392,11 +417,18 @@ function newState(){
       pj:0, gls:0, ast:0,
       clubsPlayed:[], history:[], trophies:[], achievements:[],
       milestones:{graduated:false, employed:false, married:false, child:false},
-      career:{ligaTitles:0, subcampeonatos:0, honorTitles:0, copaOro:0, copaPlata:0, copaBronce:0, copaConfraternidad:0, ascensos:0, descensos:0, mvps:0, goleadores:0, amarillas:0, rojas:0}
+      career:{ligaTitles:0, subcampeonatos:0, honorTitles:0, copaOro:0, copaPlata:0, copaBronce:0, copaConfraternidad:0, ascensos:0, descensos:0, mvps:0, goleadores:0, amarillas:0, rojas:0},
+      transferSearchUsed:false,
+      press:{confianza:50, relacionDT:50, moral:50, popularidad:50, prensa:50},
+      pressInterviewDone:false
     },
     pendingEvent:null,
     lastResult:null,
     showDetails:false,
+    pendingInterview:null,
+    lastPressHeadline:null,
+    lastPressTag:null,
+    lastPressQuestionIdx:null,
   };
 }
 
@@ -512,6 +544,184 @@ function getEventPool(p){
   if(p.edad>=26 && !p.milestones.married) pool.push(EVENT_MARRIAGE);
   if(p.edad>=28 && p.milestones.married && !p.milestones.child) pool.push(EVENT_CHILD);
   return pool;
+}
+
+/* ================= ENTREVISTAS DE PRENSA (TODOLIGA) =================
+   Una vez por temporada, antes de que puedan salir eventos de vida personal, el jugador
+   pasa por una nota de TODOLIGA con el periodista Stoian Cristoff. Es un agregado narrativo:
+   las respuestas generan efectos chicos y acotados en 5 "medidores" nuevos del jugador
+   (confianza del plantel, relación con el DT, moral, popularidad y presión de prensa), pero
+   NO tocan ovr/atributos ni ninguna otra mecánica del juego (simulación, divisionales,
+   ascensos, transferencias, contador global, etc. siguen exactamente igual). */
+const PRESS_TONE_EFFECTS = {
+  confiado:    {confianza:4, moral:1, popularidad:2, prensa:2, relacionDT:0},
+  humilde:     {confianza:0, moral:1, popularidad:1, prensa:-2, relacionDT:3},
+  polemico:    {confianza:1, moral:-1, popularidad:4, prensa:4, relacionDT:-3},
+  diplomatico: {confianza:0, moral:2, popularidad:0, prensa:-3, relacionDT:1},
+};
+const PRESS_TONE_TAGS = {
+  confiado: '📈 Subió un poco la confianza del plantel.',
+  humilde: '🤝 Mejoró apenas la relación con el entrenador.',
+  polemico: '📰 Generaste presión de prensa (pero subió tu popularidad con la gente).',
+  diplomatico: '😌 Bajó la presión mediática y mejoró un poco la moral del grupo.',
+};
+const PRESS_HEADLINES = {
+  confiado: [
+    (p)=>`${p.apellido} aseguró que el equipo está preparado para pelear el campeonato.`,
+    (p)=>`Con mucha confianza, ${p.apellido} habló de un año a puro objetivo grande.`,
+    (p)=>`${p.apellido} no se guardó nada en TODOLIGA y prometió pelear todo este año.`,
+  ],
+  humilde: [
+    (p)=>`Perfil bajo de ${p.apellido}, que prefirió pedirle paciencia a la hinchada.`,
+    (p)=>`${p.apellido} eligió la cautela antes de hacer promesas.`,
+    (p)=>`Declaraciones tranquilas de ${p.apellido}, sin exponerse de más.`,
+  ],
+  polemico: [
+    (p)=>`Las declaraciones de ${p.apellido} no cayeron bien en el vestuario.`,
+    (p)=>`Repercusión total por lo que dijo ${p.apellido} en TODOLIGA.`,
+    (p)=>`${p.apellido} sorprendió con una respuesta filosa que ya da que hablar.`,
+  ],
+  diplomatico: [
+    (p)=>`${p.apellido} evitó cualquier polémica y mantuvo un perfil bajo.`,
+    (p)=>`Respuestas medidas de ${p.apellido}, como corresponde a un profesional.`,
+    (p)=>`Nada de titulares fuertes: ${p.apellido} prefirió no generar ruido.`,
+  ],
+};
+const PRESS_QUESTIONS = [
+  {q:'¿Cómo ves al equipo para esta temporada?', answers:[
+    {label:'"El equipo viene muy bien, vamos a pelear todo."', tone:'confiado'},
+    {label:'"Hay que ir paso a paso, no quiero adelantar nada."', tone:'humilde'},
+    {label:'"La verdad, el año pasado nos faltó ambición."', tone:'polemico'},
+    {label:'"Prefiero hablar con el equipo dentro de la cancha."', tone:'diplomatico'},
+  ]},
+  {q:'¿Creés que pueden pelear el campeonato?', answers:[
+    {label:'"Sin dudas, para eso trabajamos todo el año."', tone:'confiado'},
+    {label:'"Ojalá, pero hay equipos muy parejos este año."', tone:'humilde'},
+    {label:'"Si el club invierte en serio, sí. Si no, va a costar."', tone:'polemico'},
+  ]},
+  {q:'¿Cómo te sentís en el club?', answers:[
+    {label:'"Me siento un pilar fundamental acá."', tone:'confiado'},
+    {label:'"Cómodo, agradecido por la confianza que me dan."', tone:'humilde'},
+    {label:'"Hay cosas de la dirigencia que no comparto."', tone:'polemico'},
+    {label:'"Bien, tranquilo y enfocado en lo mío."', tone:'diplomatico'},
+  ]},
+  {q:'¿Te gustaría seguir muchos años acá?', answers:[
+    {label:'"Por supuesto, quiero hacer historia en este club."', tone:'confiado'},
+    {label:'"Depende de lo que necesite el club, yo estoy a disposición."', tone:'humilde'},
+    {label:'"Eso depende de si el club responde a mi nivel."', tone:'polemico'},
+  ]},
+  {q:'¿Qué opinás del entrenador?', answers:[
+    {label:'"Un capo, me hizo crecer un montón."', tone:'confiado'},
+    {label:'"Aprendo algo nuevo con él/ella cada semana."', tone:'humilde'},
+    {label:'"Hay decisiones tácticas que no termino de entender."', tone:'polemico'},
+    {label:'"Prefiero no opinar de la parte táctica en público."', tone:'diplomatico'},
+  ]},
+  {q:'¿Cómo está el vestuario?', answers:[
+    {label:'"Un grupo unido, con hambre de gloria."', tone:'confiado'},
+    {label:'"Bien, todos remando para el mismo lado."', tone:'humilde'},
+    {label:'"Hay algunas tensiones que se van a tener que resolver."', tone:'polemico'},
+    {label:'"Como en todo grupo humano, con altos y bajos."', tone:'diplomatico'},
+  ]},
+  {q:'¿Qué objetivos personales tenés esta temporada?', answers:[
+    {label:'"Quiero ser el goleador y salir campeón."', tone:'confiado'},
+    {label:'"Sumar minutos y aportar lo que el equipo necesite."', tone:'humilde'},
+    {label:'"Ya demostré lo mío, ahora el club me tiene que acompañar."', tone:'polemico'},
+  ]},
+  {q:'¿Sentís presión por los resultados?', answers:[
+    {label:'"No, la presión es un privilegio de los grandes."', tone:'confiado'},
+    {label:'"Un poco, pero trato de disfrutar el proceso."', tone:'humilde'},
+    {label:'"La presión de la gente a veces es injusta."', tone:'polemico'},
+    {label:'"Prefiero enfocarme en lo que puedo controlar."', tone:'diplomatico'},
+  ]},
+  {q:'¿Cómo tomás las críticas de la prensa?', answers:[
+    {label:'"No me afectan, sigo mi camino."', tone:'confiado'},
+    {label:'"Trato de escuchar lo constructivo y dejar el resto."', tone:'humilde'},
+    {label:'"Muchas veces opinan sin saber lo que pasa adentro."', tone:'polemico'},
+  ]},
+  {q:'¿Qué le dirías a la hinchada?', answers:[
+    {label:'"Que confíen, este año la vamos a romper."', tone:'confiado'},
+    {label:'"Gracias por el aguante de siempre."', tone:'humilde'},
+    {label:'"Que a veces el aliento debería ser incondicional."', tone:'polemico'},
+    {label:'"Que sigan apoyando, se siente muchísimo."', tone:'diplomatico'},
+  ]},
+  {q:'¿Cómo ves a los rivales esta temporada?', answers:[
+    {label:'"Fuertes, pero estamos para pelearles a todos."', tone:'confiado'},
+    {label:'"Muy bien armados, no vamos a subestimar a nadie."', tone:'humilde'},
+    {label:'"Algunos ganan más por plata que por juego."', tone:'polemico'},
+  ]},
+  {q:'¿Te imaginás jugando en otro club en el futuro?', answers:[
+    {label:'"Hoy mi cabeza está a full en este club."', tone:'confiado'},
+    {label:'"El fútbol da muchas vueltas, nunca se sabe."', tone:'humilde'},
+    {label:'"Si en algún momento no me valoran, voy a buscar otro rumbo."', tone:'polemico'},
+  ]},
+  {q:'¿Cómo fue tu relación con tus compañeros este año?', answers:[
+    {label:'"Excelente, somos prácticamente una familia."', tone:'confiado'},
+    {label:'"Buena, cada uno aportando lo suyo."', tone:'humilde'},
+    {label:'"No con todos fue fácil, pero eso queda puertas adentro."', tone:'polemico'},
+    {label:'"Normal, como en cualquier plantel grande."', tone:'diplomatico'},
+  ]},
+  {q:'¿Qué le falta al equipo para dar el salto?', answers:[
+    {label:'"Confianza, tenemos con creces para pelear arriba."', tone:'confiado'},
+    {label:'"Un poco más de rodaje juntos, nada más."', tone:'humilde'},
+    {label:'"Más apoyo de la dirigencia, para ser sincero."', tone:'polemico'},
+  ]},
+  {q:'¿Cómo manejás la exigencia de otro año más?', answers:[
+    {label:'"La exigencia me hace mejor, no me pesa."', tone:'confiado'},
+    {label:'"Trato de ir partido a partido, sin volverme loco."', tone:'humilde'},
+    {label:'"A veces se exige más de lo que se acompaña."', tone:'polemico'},
+    {label:'"Con profesionalismo, como siempre."', tone:'diplomatico'},
+  ]},
+  {q:'¿Qué significa este club para vos?', answers:[
+    {label:'"Es mi vida, le debo todo a esta camiseta."', tone:'confiado'},
+    {label:'"Un lugar que me dio una oportunidad enorme."', tone:'humilde'},
+    {label:'"Mucho, aunque no siempre se sintió recíproco."', tone:'polemico'},
+  ]},
+  {q:'¿Cómo calificarías tu propio nivel este año?', answers:[
+    {label:'"Muy alto, de los mejores de mi carrera."', tone:'confiado'},
+    {label:'"Puedo dar mucho más todavía."', tone:'humilde'},
+    {label:'"Mejor de lo que algunos quieren reconocer."', tone:'polemico'},
+    {label:'"Eso lo tienen que evaluar otros, no yo."', tone:'diplomatico'},
+  ]},
+  {q:'¿Hay algo que te gustaría cambiar en el club?', answers:[
+    {label:'"Nada, estamos en el camino correcto."', tone:'confiado'},
+    {label:'"Siempre hay margen para mejorar procesos internos."', tone:'humilde'},
+    {label:'"Sí, hay varias cosas puertas adentro que deberían cambiar."', tone:'polemico'},
+  ]},
+];
+function pickPressQuestionIdx(){
+  if(PRESS_QUESTIONS.length<=1) return 0;
+  let idx;
+  do{ idx = Math.floor(Math.random()*PRESS_QUESTIONS.length); } while(idx===state.lastPressQuestionIdx);
+  return idx;
+}
+function continueButtonAction(){
+  const p = state.player;
+  const cat = currentCategory();
+  return (cat && cat.id==='mayores' && !p.pressInterviewDone) ? 'pressStart' : 'advance';
+}
+function startPressInterview(){
+  // Solo una vez en toda la carrera, y únicamente durante Mayores (Primera). Si por algún
+  // motivo se llama fuera de esas condiciones, se salta directo al flujo normal.
+  const cat = currentCategory();
+  if(state.player.pressInterviewDone || !cat || cat.id!=='mayores'){ advanceAfterResult(); return; }
+  const idx = pickPressQuestionIdx();
+  state.pendingInterview = {qIdx:idx};
+  state.lastPressQuestionIdx = idx;
+  state.screen = 'press';
+  render();
+}
+function resolvePressAnswer(qIdx, aIdx){
+  const p = state.player;
+  const question = PRESS_QUESTIONS[qIdx];
+  const answer = question.answers[aIdx];
+  const eff = PRESS_TONE_EFFECTS[answer.tone];
+  Object.keys(eff).forEach(k=>{ p.press[k] = clamp((p.press[k]||50) + eff[k], 0, 100); });
+  const templates = PRESS_HEADLINES[answer.tone];
+  state.lastPressHeadline = templates[Math.floor(Math.random()*templates.length)](p);
+  state.lastPressTag = PRESS_TONE_TAGS[answer.tone];
+  p.pressInterviewDone = true;
+  state.screen = 'pressResult';
+  render();
 }
 
 /* ================= ACCIONES ================= */
@@ -655,6 +865,7 @@ function finishAdvance(extraAttrDelta){
     }
     p.lastCategoryId = nextCat.id;
   }
+  p.transferSearchUsed = false;
   state.showDetails=false;
   state.screen = isCallUpToMayores ? 'callup' : 'season';
   render();
@@ -691,6 +902,11 @@ function findClubForTier(targetTier, cat, excludeNames){
 }
 function openTransferMarket(){
   const p = state.player;
+  // Mercado de pases realista: una sola búsqueda por temporada. Una vez que se abre el
+  // mercado (se generan ofertas), queda bloqueado hasta la próxima temporada, sin importar
+  // si el jugador acepta una oferta o decide quedarse en su club.
+  if(p.transferSearchUsed) return;
+  p.transferSearchUsed = true;
   const cat = currentCategory();
   const used = [p.club];
   const offers = [];
@@ -1083,7 +1299,8 @@ function render(){
   app.innerHTML = ({
     home:renderHome, create:renderCreate, offers:renderOffers, season:renderSeason,
     result:renderResult, event:renderEvent, transfer:renderTransfer, retired:renderRetired,
-    rules:renderRules, callup:renderCallup,
+    rules:renderRules, callup:renderCallup, instagram:renderInstagram,
+    press:renderPress, pressResult:renderPressResult,
   })[state.screen]();
   bindEvents();
 }
@@ -1243,7 +1460,12 @@ function renderSeason(){
       </div>
       <div class="row" style="margin-top:14px;">
         <button class="btn gold" data-action="playSeason">Jugar temporada</button>
-        <button class="btn secondary" data-action="transferMarket">Buscar club nuevo</button>
+        ${p.transferSearchUsed
+          ? `<button class="btn secondary" disabled style="opacity:.5;cursor:not-allowed;">Ya buscaste club esta temporada</button>`
+          : `<button class="btn secondary" data-action="transferMarket">Buscar club nuevo</button>`}
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary small" data-action="viewInstagram">📱 Mi Instagram</button>
       </div>
       <div class="row" style="margin-top:8px;">
         <button class="btn secondary small" data-action="toggleDetails">${state.showDetails?'Ocultar detalles':'Ver detalles de la categoría'}</button>
@@ -1314,6 +1536,130 @@ function renderTrophies(p){
   return `<div class="trophy-list">${p.trophies.slice().reverse().map(t=>`<div class="trophy-item">🏆 <span style="font-size:13px;">${t}</span></div>`).join('')}</div>`;
 }
 
+/* ================= INSTAGRAM (perfil ficticio del jugador) ================= */
+const IG_AVATAR_PALETTE = ['#4C8CF2','#3FB57C','#E2604F','#9B6DE0','#33B0C4','#E08A3B','#C94F8C','#2E9E5B','#F2B632','#5E6E8C'];
+const IG_FAN_HANDLES = [
+  'fede.uy','martu_98','juli.hincha','elgordo_verde','ro_montevideo','nacho.tricolor','sofi_futbolera',
+  'mati_carrasco','vale.uy','pancho_hincha','caro.deportes','tobi_10','agus_universitaria','fran.canario',
+  'male_hincha','gonza_uy','ceci.futbol','dieguito_10','flor_hincha','seba.uy',
+];
+const IG_HYPE_GENERIC = [
+  '🔥 Qué jugador.','Ídolo.','Un crack, como siempre.','Se lo re merece.','Grande capo 👏',
+  'No hay techo para este equipo.','Vamos que se puede más 💪','Nivel de selección esto.',
+];
+const IG_HYPE_CHAMPION = [
+  '🏆 CAMPEÓN, no hay más nada que decir.','Se lo ganó con el sudor de toda la temporada.',
+  'Este año fue TODO suyo ⚽🔥','Merecido el título, jugó una locura.',
+  'Con este nivel el título estaba cantado.',
+];
+const IG_HYPE_PROMOTED = [
+  '🎉 Subió de categoría, más que merecido.','Ese ascenso se lo ganó con guantes blancos.',
+  'Directo para arriba, vamos que se puede más 💪',
+];
+const IG_HYPE_ASPIRE_UP = [
+  'Merece ir a la A ya.','Con este nivel no puede seguir en esta categoría.',
+  'Que lo asciendan de una vez, se lo ganó.',
+];
+const IG_HYPE_WELCOME = [
+  'Bienvenido/a al club 🙌','A romperla este año 🔥','Suerte esta temporada, capo 👏',
+];
+function igShuffleN(arr, n){
+  const copy = arr.slice();
+  for(let i=copy.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [copy[i],copy[j]]=[copy[j],copy[i]]; }
+  return copy.slice(0, Math.min(n, copy.length));
+}
+function igAvatarColor(p){ return IG_AVATAR_PALETTE[hashStr(p.apellido+'|'+p.club)%IG_AVATAR_PALETTE.length]; }
+function igHandle(p){
+  const base = (p.apellido||'jugador').toLowerCase().replace(/[^a-zñ0-9]/g,'');
+  return '@'+(base||'jugador')+(p.numero||'');
+}
+function igFollowers(p){
+  const c = p.career;
+  const totalCampeonatos = c.ligaTitles+c.honorTitles+c.copaOro+c.copaPlata+c.copaBronce+c.copaConfraternidad;
+  const base = 300 + p.peakOvr*45 + totalCampeonatos*2500 + c.goleadores*700 + c.mvps*500 + p.gls*10;
+  const factor = 0.85 + (hashStr(p.apellido+'|'+p.club+'|f') % 30)/100;
+  return Math.max(120, Math.round(base*factor));
+}
+function formatEs(n){ return Math.round(n).toLocaleString('de-DE'); }
+function igBuildPost(p){
+  const h = state.lastResult;
+  const cat = currentCategory();
+  const totalCampeonatos = p.career.ligaTitles+p.career.honorTitles+p.career.copaOro+p.career.copaPlata+p.career.copaBronce+p.career.copaConfraternidad;
+  if(!h){
+    return {
+      caption: '⚽ Arrancando esta nueva carrera en '+p.club+'. ¡Vamos arriba!',
+      comments: igShuffleN(IG_HYPE_WELCOME, Math.min(2, IG_HYPE_WELCOME.length)),
+    };
+  }
+  const isChamp = !!(h.posFinal===1 || h.cupChamp || h.honorChamp);
+  let caption;
+  if(isChamp) caption = '🏆 ¡CAMPEÓN con '+p.club+'! Temporada soñada.';
+  else if(h.tierDir==='up') caption = '🎉 ¡Ascendimos con '+p.club+'!';
+  else caption = 'Otra temporada más defendiendo los colores de '+p.club+' 💪';
+
+  let pool = isChamp ? IG_HYPE_CHAMPION.concat(IG_HYPE_GENERIC) : IG_HYPE_GENERIC.slice();
+  let comments = igShuffleN(pool, isChamp ? 3 : 2);
+  if(h.tierDir==='up'){
+    comments = comments.concat(igShuffleN(IG_HYPE_PROMOTED, 1));
+  } else if(cat && cat.type==='adulta' && cat.divisions>1 && p.clubDivisionTier>0 && Math.random()<0.5){
+    comments = comments.concat(igShuffleN(IG_HYPE_ASPIRE_UP, 1));
+  }
+  if(isChamp || Math.random()<0.5){
+    const rivalPool = CLUB_NAMES.filter(n=>n!==p.club);
+    const rival = rivalPool[Math.floor(Math.random()*rivalPool.length)];
+    const rivalTemplates = [
+      'Dicen que lo quiere fichar '+rival+' 👀',
+      rival+' ya está preguntando por él/ella.',
+      'En '+rival+' sueñan con tenerlo.',
+    ];
+    comments.push(rivalTemplates[Math.floor(Math.random()*rivalTemplates.length)]);
+  }
+  return { caption, comments };
+}
+function renderInstagram(){
+  const p = state.player;
+  const cat = currentCategory();
+  const totalCampeonatos = p.career.ligaTitles+p.career.honorTitles+p.career.copaOro+p.career.copaPlata+p.career.copaBronce+p.career.copaConfraternidad;
+  const followers = igFollowers(p);
+  const likes = Math.round(followers*(0.06+ (hashStr(p.apellido+'l')%8)/100));
+  const post = igBuildPost(p);
+  const commentsHtml = post.comments.length
+    ? post.comments.map((txt,i)=>`<div class="ig-comment"><b>${IG_FAN_HANDLES[(hashStr(p.apellido+i)+i)%IG_FAN_HANDLES.length]}</b>${txt}</div>`).join('')
+    : `<div class="ig-empty">Todavía no hay comentarios.</div>`;
+  return `
+  <div class="eyebrow">Redes sociales</div>
+  <h2>Tu perfil</h2>
+  <div class="ig-card">
+    <div class="ig-topbar"><b>📷 Instagram</b></div>
+    <div class="ig-header">
+      <div class="ig-avatar" style="background:${igAvatarColor(p)};">${(p.apellido||'J')[0].toUpperCase()}</div>
+      <div>
+        <div class="ig-handle">${igHandle(p)}</div>
+        <div class="ig-name">${p.apellido||'Jugador'}</div>
+      </div>
+    </div>
+    <div class="ig-stats-row">
+      <div class="ig-stat"><span class="n">${p.history.length}</span><span class="l">publicaciones</span></div>
+      <div class="ig-stat"><span class="n">${formatEs(followers)}</span><span class="l">seguidores</span></div>
+      <div class="ig-stat"><span class="n">${180 + hashStr(p.apellido+'sig')%220}</span><span class="l">seguidos</span></div>
+    </div>
+    <div class="ig-bio">
+      📍 ${p.club || '—'}<br>
+      ⚽ ${POSITION_NAMES[p.posicion]||p.posicion}<br>
+      🏆 ${totalCampeonatos} Campeonato${totalCampeonatos===1?'':'s'}
+    </div>
+    <div class="ig-post">
+      <div class="ig-post-photo"><div class="cap">${trophySVG ? '' : ''}${post.caption}</div></div>
+      <div class="ig-actions">❤️ 💬 📤</div>
+      <div class="ig-likes">${formatEs(likes)} Me gusta</div>
+      <div class="ig-caption"><b>${igHandle(p)}</b>${post.caption}</div>
+      <div class="ig-comments">${commentsHtml}</div>
+    </div>
+  </div>
+  <button class="btn secondary" data-action="backFromInstagram">Volver</button>
+  `;
+}
+
 function renderResult(){
   const p = state.player;
   const h = state.lastResult;
@@ -1350,7 +1696,8 @@ function renderResult(){
     ${h.tierNote ? `<p><span class="tag ${h.tierDir==='up'?'up':'down'}">${h.tierNote}</span></p>` : ''}
     ${msgs.length? `<p class="muted">${msgs.join(' ')}</p>` : ''}
   </div>
-  <button class="btn gold" data-action="advance">Continuar</button>
+  <button class="btn secondary" data-action="viewInstagram" style="margin-bottom:8px;">📱 Ver reacciones en Instagram</button>
+  <button class="btn gold" data-action="${continueButtonAction()}">Continuar</button>
   `;
 }
 
@@ -1362,6 +1709,31 @@ function renderEvent(){
     <p>${ev.text}</p>
     <div class="row">${ev.options.map((o,i)=>`<button class="btn secondary" data-action="event" data-idx="${i}">${o.label}</button>`).join('')}</div>
   </div>
+  `;
+}
+
+function renderPress(){
+  const q = PRESS_QUESTIONS[state.pendingInterview.qIdx];
+  return `
+  <div class="eyebrow">TODOLIGA</div>
+  <h2>Entrevista con Stoian Cristoff</h2>
+  <div class="event-box">
+    <p><strong>Stoian Cristoff (TODOLIGA):</strong> ${q.q}</p>
+    <div class="row" style="flex-direction:column;gap:8px;align-items:stretch;">
+      ${q.answers.map((a,i)=>`<button class="btn secondary" style="text-align:left;" data-action="pressAnswer" data-qidx="${state.pendingInterview.qIdx}" data-aidx="${i}">${a.label}</button>`).join('')}
+    </div>
+  </div>
+  `;
+}
+function renderPressResult(){
+  return `
+  <div class="eyebrow">TODOLIGA</div>
+  <h2>La nota ya está en la calle</h2>
+  <div class="card">
+    <p style="font-style:italic;">TODOLIGA | Stoian Cristoff: "${state.lastPressHeadline}"</p>
+    ${state.lastPressTag ? `<p class="muted" style="font-size:13px;">${state.lastPressTag}</p>` : ''}
+  </div>
+  <button class="btn gold" data-action="pressContinue">Continuar</button>
   `;
 }
 
@@ -1405,7 +1777,10 @@ function renderRetired(){
   return `
   <div class="eyebrow">Fin de carrera</div>
   <h2>${p.apellido} se retira</h2>
-  <button class="btn gold" id="shareCareerBtn" data-action="shareCareer" style="margin-bottom:14px;">📤 Compartir mi carrera</button>
+  <div class="row" style="margin-bottom:14px;">
+    <button class="btn gold" id="shareCareerBtn" data-action="shareCareer">📤 Compartir mi carrera</button>
+    <button class="btn secondary" data-action="viewInstagram">📱 Ver mi Instagram</button>
+  </div>
   <div class="card">
     <p class="muted" style="margin:0;">Última temporada: ${p.history.length? p.history[p.history.length-1].categoria : '—'} · Pico de nivel: <span class="badge-ovr">${Math.round(p.peakOvr)}</span></p>
     <div class="stat-grid">
@@ -1465,6 +1840,11 @@ function bindEvents(){
       else if(action==='toggleDetails') toggleDetails();
       else if(action==='continueCallup') continueFromCallup();
       else if(action==='shareCareer'){ shareCareerCard(); }
+      else if(action==='viewInstagram'){ state.instagramReturnScreen = state.screen; state.screen='instagram'; render(); }
+      else if(action==='backFromInstagram'){ state.screen = state.instagramReturnScreen || 'season'; render(); }
+      else if(action==='pressStart'){ startPressInterview(); }
+      else if(action==='pressAnswer'){ resolvePressAnswer(parseInt(el.getAttribute('data-qidx')), parseInt(el.getAttribute('data-aidx'))); }
+      else if(action==='pressContinue'){ advanceAfterResult(); }
     });
   });
 }
