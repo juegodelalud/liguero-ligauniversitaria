@@ -429,6 +429,8 @@ function newState(){
     lastPressHeadline:null,
     lastPressTag:null,
     lastPressQuestionIdx:null,
+    lastLeaderboardRank:null,
+    leaderboardReturnScreen:null,
   };
 }
 
@@ -871,7 +873,7 @@ function finishAdvance(extraAttrDelta){
   render();
 }
 function continueFromCallup(){ state.screen='season'; render(); }
-function retireNow(){ state.screen='retired'; render(); }
+function retireNow(){ state.screen='retired'; state.lastLeaderboardRank=null; lbMaybeSubmit(state.player); render(); }
 function toggleDetails(){ state.showDetails = !state.showDetails; render(); }
 
 // Mercado de pases realista:
@@ -1300,7 +1302,7 @@ function render(){
     home:renderHome, create:renderCreate, offers:renderOffers, season:renderSeason,
     result:renderResult, event:renderEvent, transfer:renderTransfer, retired:renderRetired,
     rules:renderRules, callup:renderCallup, instagram:renderInstagram,
-    press:renderPress, pressResult:renderPressResult,
+    press:renderPress, pressResult:renderPressResult, leaderboard:renderLeaderboard,
   })[state.screen]();
   bindEvents();
 }
@@ -1382,7 +1384,19 @@ function renderHome(){
   <div class="row">
     <button class="btn gold" data-action="start">Comenzar carrera</button>
     <button class="btn secondary" onclick="openRules()">Ver Detalles de la Liga</button>
+    <button class="btn secondary" data-action="viewLeaderboard">🏆 Top 3 histórico</button>
   </div>
+  `;
+}
+function renderLeaderboard(){
+  return `
+  <div class="eyebrow">Historia de la Liga</div>
+  <h2>🏆 Top 3 histórico de la Liga</h2>
+  <p class="muted" style="max-width:600px;">El ranking global de mayor nivel (media máxima / OVR pico) alcanzado por cualquier jugador, de cualquier navegador, desde que existe LIGUERO.</p>
+  <div class="card">
+    <div id="lbList"><p class="muted" style="font-size:13px;">Cargando el ranking global...</p></div>
+  </div>
+  <button class="btn secondary" data-action="backFromLeaderboard">Volver</button>
   `;
 }
 
@@ -1777,9 +1791,11 @@ function renderRetired(){
   return `
   <div class="eyebrow">Fin de carrera</div>
   <h2>${p.apellido} se retira</h2>
+  ${state.lastLeaderboardRank ? `<div class="disclaimer" style="border-color:var(--gold-soft);background:var(--gold-soft);color:var(--gold-text);font-weight:600;">🎉 ¡Entraste al Top 3 histórico de la Liga! Puesto ${state.lastLeaderboardRank} con OVR ${Math.round(p.peakOvr)}.</div>` : ''}
   <div class="row" style="margin-bottom:14px;">
     <button class="btn gold" id="shareCareerBtn" data-action="shareCareer">📤 Compartir mi carrera</button>
     <button class="btn secondary" data-action="viewInstagram">📱 Ver mi Instagram</button>
+    <button class="btn secondary" data-action="viewLeaderboard">🏆 Ver Top 3 histórico</button>
   </div>
   <div class="card">
     <p class="muted" style="margin:0;">Última temporada: ${p.history.length? p.history[p.history.length-1].categoria : '—'} · Pico de nivel: <span class="badge-ovr">${Math.round(p.peakOvr)}</span></p>
@@ -1845,6 +1861,8 @@ function bindEvents(){
       else if(action==='pressStart'){ startPressInterview(); }
       else if(action==='pressAnswer'){ resolvePressAnswer(parseInt(el.getAttribute('data-qidx')), parseInt(el.getAttribute('data-aidx'))); }
       else if(action==='pressContinue'){ advanceAfterResult(); }
+      else if(action==='viewLeaderboard'){ state.leaderboardReturnScreen = state.screen; state.screen='leaderboard'; render(); loadLeaderboardIntoDOM(); }
+      else if(action==='backFromLeaderboard'){ state.screen = state.leaderboardReturnScreen || 'home'; render(); }
     });
   });
 }
@@ -1914,6 +1932,99 @@ async function incrementSeasonsCounter(){
   let local = parseInt(localStorage.getItem('lud_local_seasons')||'0',10)+1;
   try{ localStorage.setItem('lud_local_seasons', String(local)); }catch(_){}
   if(el) el.textContent = local+' (en este navegador)';
+}
+
+/* ================= RANKING GLOBAL: TOP 3 HISTÓRICO DE LA LIGA =================
+   Usa el MISMO servicio ya probado y funcionando de los contadores (countapi.mileshilliard.com,
+   sin registro ni claves). Ese servicio solo guarda NÚMEROS por clave, no texto, así que el
+   nombre del jugador se codifica de forma reversible como un número (base 36) y el club se
+   guarda como su posición dentro de CLUB_NAMES. Se arma con 3 "puestos" (top1/top2/top3), cada
+   uno con 3 claves numéricas propias (ovr, nombre codificado, índice de club).
+   Aviso honesto: como no hay una operación atómica de "comparar y guardar" en este servicio
+   gratuito, si dos personas se retiran en el mismo instante exacto podría perderse una
+   actualización. Para el uso normal del juego eso no va a pasar. */
+const LB_KEY_PREFIX = 'liguero_lud_santiago_geisinger_top';
+const LB_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function lbEncodeName(name){
+  const clean = (name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,10);
+  if(!clean) return 0;
+  let n = 0;
+  for(let i=0;i<clean.length;i++){ n = n*36 + (LB_ALPHABET.indexOf(clean[i])+1); }
+  return n;
+}
+function lbDecodeName(num){
+  num = Math.round(Number(num)||0);
+  if(!num) return '???';
+  const chars = [];
+  while(num>0){
+    let d = num % 36;
+    if(d===0) d = 36;
+    chars.unshift(LB_ALPHABET[d-1]);
+    num = (num-d)/36;
+  }
+  return chars.join('');
+}
+function lbClubIndex(name){ const i = CLUB_NAMES.indexOf(name); return i>=0 ? i : -1; }
+function lbClubName(idx){ return (idx!==null && idx!==undefined && idx>=0 && CLUB_NAMES[idx]) ? CLUB_NAMES[idx] : '—'; }
+function lbKey(slot, field){ return LB_KEY_PREFIX+slot+'_'+field; }
+async function lbSetCount(key, value){
+  try{ await fetch(`${COUNTER_API_BASE}/set/${key}?value=${encodeURIComponent(Math.round(value))}`); }catch(e){}
+}
+async function lbFetchSlot(slot){
+  const [ovr, nameNum, clubNum] = await Promise.all([
+    fetchGlobalCount(lbKey(slot,'ovr')),
+    fetchGlobalCount(lbKey(slot,'name')),
+    fetchGlobalCount(lbKey(slot,'club')),
+  ]);
+  return { ovr: ovr||0, nameNum: nameNum||0, clubIdx: (clubNum===null||clubNum===undefined) ? -1 : clubNum };
+}
+async function lbSetSlot(slot, entry){
+  await Promise.all([
+    lbSetCount(lbKey(slot,'ovr'), entry.ovr),
+    lbSetCount(lbKey(slot,'name'), entry.nameNum),
+    lbSetCount(lbKey(slot,'club'), entry.clubIdx),
+  ]);
+}
+async function lbFetchTop3(){
+  const slots = await Promise.all([1,2,3].map(s=>lbFetchSlot(s)));
+  return slots.map(s => s.ovr>0 ? { ovr:s.ovr, name: lbDecodeName(s.nameNum), club: lbClubName(s.clubIdx) } : null);
+}
+// Se llama SOLO al retirarse (el peakOvr ya es definitivo). No bloquea la pantalla de retiro:
+// se ejecuta en segundo plano y, si corresponde, actualiza el cartel de "entraste al Top 3".
+async function lbMaybeSubmit(p){
+  const newOvr = Math.round(p.peakOvr);
+  if(newOvr<=0) return;
+  try{
+    const slots = await Promise.all([1,2,3].map(s=>lbFetchSlot(s)));
+    let insertAt = -1;
+    for(let i=0;i<3;i++){ if(newOvr > (slots[i].ovr||0)){ insertAt = i; break; } }
+    if(insertAt===-1) return;
+    const entries = slots.map(s=>({ovr:s.ovr, nameNum:s.nameNum, clubIdx:s.clubIdx}));
+    entries.splice(insertAt, 0, { ovr:newOvr, nameNum: lbEncodeName(p.apellido), clubIdx: lbClubIndex(p.club) });
+    entries.length = 3;
+    await Promise.all(entries.map((e,i)=>lbSetSlot(i+1, e)));
+    if(state.player===p && state.screen==='retired'){
+      state.lastLeaderboardRank = insertAt+1;
+      render();
+    }
+  }catch(e){ /* si falla la red, el resto del juego sigue funcionando igual */ }
+}
+async function loadLeaderboardIntoDOM(){
+  const el = document.getElementById('lbList');
+  if(!el) return;
+  try{
+    const top3 = await lbFetchTop3();
+    const freshEl = document.getElementById('lbList');
+    if(!freshEl) return; // el jugador ya se fue de la pantalla
+    const medals = ['🥇','🥈','🥉'];
+    freshEl.innerHTML = top3.map((e,i)=> e
+      ? `<div class="trophy-item">${medals[i]} <span style="font-size:14px;"><strong>${e.name}</strong> — OVR ${e.ovr} · ${e.club}</span></div>`
+      : `<div class="trophy-item">${medals[i]} <span class="muted" style="font-size:13px;">Todavía nadie llegó a este puesto.</span></div>`
+    ).join('');
+  }catch(e){
+    const freshEl = document.getElementById('lbList');
+    if(freshEl) freshEl.innerHTML = '<p class="muted" style="font-size:13px;">No se pudo cargar el ranking ahora. Probá de nuevo más tarde.</p>';
+  }
 }
 
 let feedbackRating = null;
