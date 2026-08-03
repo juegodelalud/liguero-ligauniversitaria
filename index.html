@@ -398,6 +398,11 @@ function growAttributes(p, extra){
   else if(age<=34){ physDelta=rand(-3,0); techDelta=rand(-1,1); mentDelta=rand(1,3); }
   else if(age<=44){ physDelta=rand(-4,-1); techDelta=rand(-2,0); mentDelta=rand(0,2); }
   else { physDelta=rand(-5,-2); techDelta=rand(-3,-1); mentDelta=rand(-1,1); }
+  // Empujoncito de crecimiento ocasional: solo en carreras con "racha" (ver LUCKY_CAREER_CHANCE),
+  // y ni siquiera todas las temporadas de esas carreras — nada de esto aplica al resto.
+  if(p.luckyCareer && Math.random()<LUCKY_GROWTH_CHANCE){
+    physDelta += 2; techDelta += 2; mentDelta += 1;
+  }
   physKeys.forEach(k=> p.attrs[k]=clamp(p.attrs[k]+physDelta+rand(-1,1)+(extra[k]||0),20,99));
   techKeys.forEach(k=> p.attrs[k]=clamp(p.attrs[k]+techDelta+rand(-1,1)+(extra[k]||0),20,99));
   mentKeys.forEach(k=> p.attrs[k]=clamp(p.attrs[k]+mentDelta+rand(-1,1)+(extra[k]||0),20,99));
@@ -416,11 +421,22 @@ function newState(){
       club:'', clubDivisionTier:0, serieLetter:'A', lastCategoryId:null,
       pj:0, gls:0, ast:0,
       clubsPlayed:[], history:[], trophies:[], achievements:[],
-      milestones:{graduated:false, employed:false, married:false, child:false},
+      milestones:{graduated:false, employed:false, married:false, child:false, wentExchange:false, hadRelationship:false},
       career:{ligaTitles:0, subcampeonatos:0, honorTitles:0, copaOro:0, copaPlata:0, copaBronce:0, copaConfraternidad:0, ascensos:0, descensos:0, mvps:0, goleadores:0, amarillas:0, rojas:0},
       transferSearchUsed:false,
       press:{confianza:50, relacionDT:50, moral:50, popularidad:50, prensa:50},
-      pressInterviewDone:false
+      pressInterviewDone:false,
+      wentPro:false,
+      coach:null,
+      skipNextSeason:false,
+      repeatReservaPending:false, // si aceptás el intercambio a los 22, tras perder la temporada repetís un año en Reserva
+      categoryOverrideId:null,    // fuerza la categoría de la próxima temporada jugada (se usa para el repechaje de Reserva)
+      _savedAdultTier:null,       // guarda tu divisional de Mayores mientras repetís el año en Reserva, para retomarlo después
+      // "Racha" de la carrera: la mayoría de las carreras NO la tiene (quedan con la dificultad
+      // de siempre). Solo una porción, sorteada una vez al arrancar, tiene un empujón extra
+      // notorio para salir campeón/ascender y llegar a un nivel más alto. Es a propósito
+      // desparejo: para que a veces se sienta una carrera "redonda" sin que sea lo normal.
+      luckyCareer: Math.random() < LUCKY_CAREER_CHANCE
     },
     pendingEvent:null,
     lastResult:null,
@@ -430,6 +446,7 @@ function newState(){
     lastPressTag:null,
     lastPressQuestionIdx:null,
     lastLeaderboardRank:null,
+    lastTitlesLeaderboardRank:null,
     leaderboardReturnScreen:null,
   };
 }
@@ -439,21 +456,32 @@ function newState(){
 // y honor). Es un ajuste chico a propósito: no debe hacer que siempre ganes, solo mejorar un poco
 // tus chances frente a un rival de nivel parejo. Para hacerlo más notorio, subir estos números;
 // para volver a como estaba antes, ponerlos en 0.
-const CHAMPION_LUCK_RATING = 0.5;   // puntos extra de rating en las tablas de posiciones
-const CHAMPION_LUCK_CHANCE = 0.015; // extra de probabilidad (0 a 1) en llaves de Copa/Honor
-function simulateStandingsJuvenil(ovr, n){
+const CHAMPION_LUCK_RATING = 0.5;   // puntos extra de rating en las tablas de posiciones (SIEMPRE, toda carrera)
+const CHAMPION_LUCK_CHANCE = 0.015; // extra de probabilidad (0 a 1) en llaves de Copa/Honor (SIEMPRE, toda carrera)
+// "Racha" de carrera: además del empujón parejo de arriba (que reciben TODAS las carreras),
+// una porción de las carreras (sorteada una sola vez, al crear el jugador) recibe un empujón
+// EXTRA bastante más notorio. El resto sigue exactamente con la dificultad de siempre. Así,
+// a veces una carrera se siente "redonda" (más chances de ser campeón/ascender/llegar alto de
+// nivel), pero no es la norma — sigue constando en la gran mayoría de las carreras.
+const LUCKY_CAREER_CHANCE = 0.22;        // ~1 de cada 4-5 carreras tiene la racha
+const LUCKY_RATING_BONUS = 1.2;          // puntos extra de rating, SOLO en carreras con racha
+const LUCKY_CHANCE_BONUS = 0.02;         // probabilidad extra en Copa/Honor, SOLO en carreras con racha
+const LUCKY_GROWTH_CHANCE = 0.12;        // % de temporadas con un empujoncito de crecimiento extra, SOLO en carreras con racha
+function luckRatingFor(p){ return CHAMPION_LUCK_RATING + ((p && p.luckyCareer) ? LUCKY_RATING_BONUS : 0); }
+function luckChanceFor(p){ return CHAMPION_LUCK_CHANCE + ((p && p.luckyCareer) ? LUCKY_CHANCE_BONUS : 0); }
+function simulateStandingsJuvenil(ovr, n, p){
   const arr=[];
   for(let i=0;i<n-1;i++) arr.push({p:false, r: BASE_STRENGTH_JUVENIL + rand(-16,16)});
-  arr.push({p:true, r: ovr + CHAMPION_LUCK_RATING + rand(-8,8)});
+  arr.push({p:true, r: ovr + luckRatingFor(p) + rand(-8,8)});
   arr.sort((a,b)=>b.r-a.r);
   return arr.findIndex(t=>t.p)+1;
 }
-function simulateStandingsAdulta(tier, ovr){
+function simulateStandingsAdulta(tier, ovr, p){
   const n=16;
   const base = baseStrengthAdult(tier);
   const arr=[];
   for(let i=0;i<n-1;i++) arr.push({p:false, r: base + rand(-14,14)});
-  arr.push({p:true, r: ovr*0.9 + CHAMPION_LUCK_RATING + rand(-8,8)});
+  arr.push({p:true, r: ovr*0.9 + luckRatingFor(p) + rand(-8,8)});
   arr.sort((a,b)=>b.r-a.r);
   return arr.findIndex(t=>t.p)+1;
 }
@@ -462,8 +490,8 @@ function simulateBracket(rounds, winChance){
   for(let r=0;r<rounds;r++){ if(Math.random()<winChance) advanced++; else break; }
   return {advanced, rounds, champ: advanced===rounds};
 }
-function simulateHonor(ovr, refStrength){
-  const chance = clamp(0.42 + (ovr-refStrength)/120 + CHAMPION_LUCK_CHANCE, .1, .7);
+function simulateHonor(ovr, refStrength, p){
+  const chance = clamp(0.42 + (ovr-refStrength)/120 + luckChanceFor(p), .1, .7);
   return simulateBracket(4, chance);
 }
 // Ascenso/descenso: siempre un solo escalón por temporada (nunca de la G a la A de una).
@@ -495,11 +523,44 @@ const EVENT_EXAMS = { text:'Época de parciales en la facultad: los entrenamient
     {label:'Priorizar el fútbol', apply:(p)=>{ p._attrDelta={resistencia:3,fisico:2}; p._eventNote='Le metiste toda la ficha a la cancha.'; }},
     {label:'Priorizar el estudio', apply:(p)=>{ p._attrDelta={resistencia:-2,liderazgo:2}; p._eventNote='Cuidaste tus estudios; el físico resintió un poco pero maduraste como cabeza del plantel.'; }},
   ]};
-const EVENT_INJURY = { text:'Una molestia física te tiene en duda para lo que viene.',
-  options:[
-    {label:'Forzar la vuelta', apply:(p)=>{ if(Math.random()<0.4){ p._attrDelta={fisico:-6,resistencia:-4}; p._eventNote='Forzaste y la molestia empeoró.'; } else { p._attrDelta={liderazgo:1}; p._eventNote='Forzaste y no pasó nada grave.'; } }},
-    {label:'Guardarte y recuperarte bien', apply:(p)=>{ p._eventNote='Te cuidaste y llegaste entero a la próxima temporada.'; }},
-  ]};
+// Lesiones con distinta gravedad: la mayoría son moleculares (contractura, esguince), el desgarro
+// es intermedio, y la fractura o la rotura de ligamento cruzado son raras a propósito (mismo
+// espíritu que el resto del juego: que duela un poco, no que arruine la carrera). Se elige una
+// al azar CADA VEZ que toca el evento de lesión, con pesos, pero sigue ocupando el mismo lugar
+// en el pool de eventos que antes (no cambia la probabilidad total de que aparezca una lesión).
+const INJURY_VARIANTS = [
+  { weight:30, text:'Terminaste la temporada con una contractura muscular molesta, nada grave.',
+    options:[
+      {label:'Entrenar igual, forzando un poco', apply:(p)=>{ if(Math.random()<0.25){ p._attrDelta={fisico:-2,resistencia:-1}; p._eventNote='La contractura se hizo un poco más pesada.'; } else { p._eventNote='No pasó nada, la contractura se fue sola.'; } }},
+      {label:'Sesiones extra de kinesiología', apply:(p)=>{ p._attrDelta={resistencia:1}; p._eventNote='Con la kinesiología llegaste mejor preparado.'; }},
+    ]},
+  { weight:28, text:'Un mal pisotón te dejó con un esguince de tobillo.',
+    options:[
+      {label:'Forzar la vuelta', apply:(p)=>{ if(Math.random()<0.4){ p._attrDelta={fisico:-6,resistencia:-4}; p._eventNote='Forzaste y el esguince empeoró.'; } else { p._attrDelta={liderazgo:1}; p._eventNote='Forzaste y no pasó nada grave.'; } }},
+      {label:'Guardarte y recuperarte bien', apply:(p)=>{ p._eventNote='Te cuidaste y llegaste entero a la próxima temporada.'; }},
+    ]},
+  { weight:22, text:'Un desgarro en el isquiotibial te sacó de las canchas varias semanas.',
+    options:[
+      {label:'Apurar la vuelta a los entrenamientos', apply:(p)=>{ if(Math.random()<0.5){ p._attrDelta={fisico:-8,velocidad:-4,resistencia:-3}; p._eventNote='Apuraste los tiempos y el desgarro te jugó una mala pasada: recaíste.'; } else { p._attrDelta={liderazgo:1}; p._eventNote='Apuraste los tiempos pero por suerte no recayó.'; } }},
+      {label:'Cumplir todo el proceso de recuperación', apply:(p)=>{ p._attrDelta={fisico:-2,resistencia:1}; p._eventNote='Hiciste toda la rehabilitación como corresponde y volviste sólido.'; }},
+    ]},
+  { weight:12, text:'Un choque fortuito te dejó con una fractura de peroné.',
+    options:[
+      {label:'Volver apenas te den el alta médica', apply:(p)=>{ if(Math.random()<0.45){ p._attrDelta={fisico:-10,velocidad:-6,resistencia:-5}; p._eventNote='Volviste demasiado rápido y el hueso no había cerrado del todo bien.'; } else { p._attrDelta={fisico:-4,resistencia:-2}; p._eventNote='Volviste apenas te dieron el alta, sin sobresaltos.'; } }},
+      {label:'Tomarte todo el tiempo de recuperación', apply:(p)=>{ p._attrDelta={fisico:-3,liderazgo:2}; p._eventNote='Te tomaste todo el tiempo necesario: la pasaste mal afuera de la cancha, pero volviste entero.'; }},
+    ]},
+  { weight:8, text:'El peor miedo de todo futbolista: te rompiste el ligamento cruzado de la rodilla.',
+    options:[
+      {label:'Operarte y apurar la rehabilitación', apply:(p)=>{ if(Math.random()<0.5){ p._attrDelta={fisico:-14,velocidad:-9,resistencia:-6,cabezazo:-2}; p._eventNote='La rehabilitación apurada del cruzado te pasó factura: nunca terminaste de sentirte igual.'; } else { p._attrDelta={fisico:-6,velocidad:-3,liderazgo:2}; p._eventNote='Contra todo pronóstico, te recuperaste del cruzado antes de lo esperado.'; } }},
+      {label:'Operarte y respetar el proceso completo', apply:(p)=>{ p._attrDelta={fisico:-7,velocidad:-3,liderazgo:3}; p._eventNote='Fue un año durísimo de rehabilitación, pero volviste a jugar y eso ya es una victoria.'; }},
+    ]},
+];
+function pickInjuryEvent(){
+  const total = INJURY_VARIANTS.reduce((s,v)=>s+v.weight,0);
+  let r = Math.random()*total;
+  for(const v of INJURY_VARIANTS){ if(r<v.weight) return v; r-=v.weight; }
+  return INJURY_VARIANTS[0];
+}
 const EVENT_CAPTAIN = { text:'La comisión directiva te ofrece la cinta de capitán.',
   options:[
     {label:'Aceptar el liderazgo', apply:(p)=>{ p._attrDelta={liderazgo:5}; p._eventNote='Ser capitán te hizo madurar como jugador.'; }},
@@ -520,6 +581,20 @@ const EVENT_GRADUATION = { text:'Después de años de estudio, te recibiste en l
     {label:'Festejar a lo grande con el plantel', apply:(p)=>{ p.milestones.graduated=true; p._attrDelta={liderazgo:2}; p._eventNote='Te recibiste y lo festejaste con todos.'; }},
     {label:'Celebrarlo en familia, bajo perfil', apply:(p)=>{ p.milestones.graduated=true; p._attrDelta={vision:2}; p._eventNote='Te recibiste: un antes y un después fuera de la cancha.'; }},
   ]};
+const EVENT_NOVIAZGO = { text:'Empezaste a salir con alguien.',
+  options:[
+    {label:'Salir mucho de noche con tu pareja', apply:(p)=>{
+      p.milestones.hadRelationship=true;
+      if(p.press) p.press.moral = clamp((p.press.moral||50)+3, 0, 100);
+      p._attrDelta={fisico:-2,resistencia:-2};
+      p._eventNote='Entre las salidas nocturnas y la relación nueva, te relajaste con la exigencia física, pero estás mucho más contento.';
+    }},
+    {label:'Mantener la relación bajo control, sin descuidar el fútbol', apply:(p)=>{
+      p.milestones.hadRelationship=true;
+      p._attrDelta={vision:1,liderazgo:1};
+      p._eventNote='Encontraste el equilibrio entre la nueva relación y la profesión.';
+    }},
+  ]};
 const EVENT_MARRIAGE = { text:'Te casaste.',
   options:[
     {label:'Luna de miel larga', apply:(p)=>{ p.milestones.married=true; p._attrDelta={resistencia:-2,liderazgo:2}; p._eventNote='Te tomaste un buen descanso antes de volver a full.'; }},
@@ -534,15 +609,46 @@ const EVENT_JOB = { text:'Te salió una oportunidad laboral estable, fuera del f
     {label:'Tomar el trabajo y acomodar los horarios de entrenamiento', apply:(p)=>{ p.milestones.employed=true; p._attrDelta={resistencia:-1,liderazgo:2}; p._eventNote='Conseguiste trabajo: ahora repartís el día entre la oficina y la cancha.'; }},
     {label:'Rechazarlo por ahora y enfocarte solo en el fútbol', apply:(p)=>{ p._attrDelta={fisico:1}; p._eventNote='Preferiste esperar y seguir a pleno con lo deportivo.'; }},
   ]};
+const EVENT_EXCHANGE = { text:'Te ofrecen una beca de intercambio académico en el exterior por un semestre.',
+  options:[
+    {label:'Aceptar el intercambio', apply:(p)=>{
+      p.milestones.wentExchange=true;
+      if(p.edad===22){
+        // Justo el año de tu debut en Mayores: te vas de intercambio y te perdés toda la
+        // temporada que viene (0 partidos). Es la única edad en la que el intercambio cuesta tan caro.
+        // Encima, al volver no retomás directo en Mayores: repetís un año en Reserva antes de
+        // que te vuelvan a llamar arriba.
+        p.skipNextSeason = true;
+        p.repeatReservaPending = true;
+        p._attrDelta={vision:3,liderazgo:2};
+        p._eventNote='Te fuiste de intercambio justo en tu año de debut en Mayores: te vas a perder toda la temporada que viene, y al volver vas a tener que repetir un año en Reserva antes de que te vuelvan a llamar arriba. Igual, volvés con la cabeza mucho más madura.';
+      } else {
+        p._attrDelta={resistencia:-3,fisico:-2,vision:3,liderazgo:2};
+        p._eventNote='Te fuiste de intercambio: perdiste ritmo físico, pero volviste con la cabeza mucho más madura.';
+      }
+    }},
+    {label:'Rechazarlo y quedarte enfocado en el fútbol', apply:(p)=>{ p.milestones.wentExchange=true; p._attrDelta={fisico:1,resistencia:1}; p._eventNote='Preferiste no arriesgar tu lugar en el equipo y seguir entrenando sin interrupciones.'; }},
+  ]};
+const EVENT_NIGHT_OUT = { text:'Tus compañeros te invitan a salir la noche antes de un partido importante.',
+  options:[
+    {label:'Salir con el plantel', apply:(p)=>{
+      if(p.press) p.press.moral = clamp((p.press.moral||50)+2, 0, 100);
+      if(Math.random()<0.5){ p._attrDelta={fisico:-3,resistencia:-2}; p._eventNote='Te trasnochaste y al otro día lo pagaste caro físicamente.'; }
+      else { p._attrDelta={liderazgo:1}; p._eventNote='Saliste con el plantel y por suerte no pasó factura; el grupo se unió un poco más.'; }
+    }},
+    {label:'Quedarte a descansar', apply:(p)=>{ p._attrDelta={resistencia:1}; p._eventNote='Preferiste cuidar el cuerpo y llegaste fresco al partido.'; }},
+  ]};
 
 // A partir de los 24 años el estudio deja de aparecer y gana peso la vida laboral y personal
 // (trabajo, casamiento, hijos, vínculo con el DT y el plantel). Los eventos son ocasionales:
 // solo hay chance de que aparezca alguno un 40% de las temporadas.
 function getEventPool(p){
-  const pool = [EVENT_INJURY, EVENT_CAPTAIN, EVENT_LOCKERROOM, EVENT_COACH_FIGHT];
+  const pool = [pickInjuryEvent(), EVENT_CAPTAIN, EVENT_LOCKERROOM, EVENT_COACH_FIGHT, EVENT_NIGHT_OUT];
   if(p.edad<24) pool.push(EVENT_EXAMS);
+  if(p.edad>=18 && p.edad<=23 && !p.milestones.wentExchange) pool.push(EVENT_EXCHANGE);
   if(p.edad>=23 && !p.milestones.graduated) pool.push(EVENT_GRADUATION);
   if(p.edad>=24 && !p.milestones.employed) pool.push(EVENT_JOB);
+  if(p.edad>=17 && p.edad<=28 && !p.milestones.hadRelationship && !p.milestones.married) pool.push(EVENT_NOVIAZGO);
   if(p.edad>=26 && !p.milestones.married) pool.push(EVENT_MARRIAGE);
   if(p.edad>=28 && p.milestones.married && !p.milestones.child) pool.push(EVENT_CHILD);
   return pool;
@@ -751,20 +857,55 @@ function pickClub(name){
   state.screen='season'; render();
 }
 
-function currentCategory(){ return categoryForAge(state.player.edad); }
+function currentCategory(){
+  const p = state.player;
+  // Si estás repitiendo el año de Reserva tras un intercambio, la categoría de la próxima
+  // temporada queda forzada a Reserva aunque tu edad ya corresponda a Mayores.
+  if(p.categoryOverrideId){ return CATEGORIES.find(c=>c.id===p.categoryOverrideId) || categoryForAge(p.edad); }
+  return categoryForAge(p.edad);
+}
 
-function playSeason(){
-  // Cada click real en "Jugar temporada" suma 1 al contador global de partidas jugadas.
-  incrementSeasonsCounter();
+function playLostSeason(){
   const p = state.player;
   const cat = currentCategory();
+  const histRow = {
+    edad:p.edad, categoria:cat.label, club:p.club, tierLabel:'Intercambio académico', posFinal:null,
+    pj:0, gls:0, ast:0, ovr:Math.round(p.ovr), cupLabel:null, cupChamp:false, honorQualified:false,
+    honorChamp:false, tierNote:null, tierDir:null, mvp:false, topScorer:false, lostSeason:true,
+  };
+  p.history.push(histRow);
+  // Si esta temporada perdida fue justo la del intercambio a los 22, programamos que la
+  // PRÓXIMA temporada jugada sea un año repetido en Reserva, aunque tu edad ya sea de Mayores.
+  if(p.repeatReservaPending){
+    p.repeatReservaPending = false;
+    p.categoryOverrideId = 'reserva';
+    p._savedAdultTier = p.clubDivisionTier;
+    const reservaCat = CATEGORIES.find(c=>c.id==='reserva');
+    p.clubDivisionTier = assignInitialAdultTier(reservaCat, p.ovr, p.club);
+  }
+  state.lastResult = histRow;
+  state.screen='result';
+  render();
+}
+function playSeason(){
+  const p = state.player;
+  // El intercambio a los 22 hace perder la temporada entera: nada de simulación ni de sumar
+  // al contador global de partidas (no se jugó ni un partido de verdad).
+  if(p.skipNextSeason){ p.skipNextSeason = false; playLostSeason(); return; }
+  // Cada click real en "Jugar temporada" suma 1 al contador global de partidas jugadas.
+  incrementSeasonsCounter();
+  const cat = currentCategory();
+  // Si estás repitiendo el año de Reserva tras el intercambio a los 22, esta temporada se juega
+  // con las reglas de Reserva aunque tu edad ya sea de Mayores; al terminar, se retoma tu
+  // divisional de Mayores tal cual estaba (ver más abajo).
+  const isRepeatedReserva = p.categoryOverrideId === 'reserva';
   let posFinal, tierLabel, cupResult=null, honorResult=null, tierUpdate={note:null,dir:null,newTier:p.clubDivisionTier};
 
   if(cat.type==='juvenil'){
     // Sub 14, Sub 16 y Sub 18 no tienen Campeonato de Honor (eso arranca recién en Sub 20).
     // Sus únicos torneos son estas cuatro copas, según la posición final en la serie.
     const serieN = serieTeamsFor(cat.id);
-    posFinal = simulateStandingsJuvenil(p.ovr, serieN);
+    posFinal = simulateStandingsJuvenil(p.ovr, serieN, p);
     tierLabel = 'Serie '+p.serieLetter;
     const quarter = Math.ceil(serieN/4);
     let label, diffAdj;
@@ -772,15 +913,15 @@ function playSeason(){
     else if(posFinal<=quarter*2){label='Copa de Plata'; diffAdj=-6;}
     else if(posFinal<=quarter*3){label='Copa de Bronce'; diffAdj=-12;}
     else {label='Copa de Confraternidad'; diffAdj=-18;}
-    const chance = clamp(0.5 + (p.ovr-(BASE_STRENGTH_JUVENIL+diffAdj))/120 + CHAMPION_LUCK_CHANCE,.15,.85);
+    const chance = clamp(0.5 + (p.ovr-(BASE_STRENGTH_JUVENIL+diffAdj))/120 + luckChanceFor(p),.15,.85);
     const br = simulateBracket(3, chance);
     cupResult = {label, champ:br.champ};
   } else {
     const tier = clamp(p.clubDivisionTier,0,cat.divisions-1);
-    posFinal = simulateStandingsAdulta(tier, p.ovr);
+    posFinal = simulateStandingsAdulta(tier, p.ovr, p);
     tierLabel = cat.divisions<=1 ? 'Categoría única' : ('Divisional '+DIV_LETTERS[tier]);
     tierUpdate = updateTierAdulta(cat, tier, posFinal);
-    if(posFinal<=4){ honorResult = simulateHonor(p.ovr, baseStrengthAdult(tier)); }
+    if(posFinal<=4){ honorResult = simulateHonor(p.ovr, baseStrengthAdult(tier), p); }
   }
 
   // En las Divisionales de 16 equipos se juegan 22 fechas por temporada; en las Series juveniles,
@@ -798,8 +939,13 @@ function playSeason(){
   const isTopScorer = golRate >= 0.5 && Math.random() < 0.25;
 
   const trophies=[]; const achievements=[];
-  if(posFinal===1){ trophies.push('Campeón de Liga — '+cat.label+' ('+p.edad+' años)'); p.career.ligaTitles++; }
-  if(posFinal===2){ achievements.push('Subcampeón — '+cat.label+' ('+p.edad+' años)'); p.career.subcampeonatos++; }
+  // "Campeón de Liga" y "Subcampeón" son títulos de las categorías adultas (con tabla de posiciones
+  // real). En las juveniles no existe un campeón de liga aparte: tu posición en la Serie solo define
+  // a qué Copa entrás (Oro/Plata/Bronce/Confraternidad); el único título real ahí es ganar esa Copa.
+  if(cat.type==='adulta'){
+    if(posFinal===1){ trophies.push('Campeón de Liga — '+cat.label+' ('+p.edad+' años)'); p.career.ligaTitles++; }
+    if(posFinal===2){ achievements.push('Subcampeón — '+cat.label+' ('+p.edad+' años)'); p.career.subcampeonatos++; }
+  }
   if(cupResult && cupResult.champ){
     trophies.push('Campeón '+cupResult.label+' — '+cat.label+' ('+p.edad+' años)');
     if(cupResult.label==='Copa de Oro') p.career.copaOro++;
@@ -818,13 +964,20 @@ function playSeason(){
     edad:p.edad, categoria:cat.label, club:p.club, tierLabel, posFinal, pj, gls, ast,
     ovr:Math.round(p.ovr), cupLabel: cupResult?cupResult.label:null, cupChamp: cupResult?cupResult.champ:false,
     honorQualified: !!honorResult, honorChamp: honorResult?honorResult.champ:false,
-    tierNote: tierUpdate.note, tierDir: tierUpdate.dir, mvp, topScorer: isTopScorer
+    tierNote: tierUpdate.note, tierDir: tierUpdate.dir, mvp, topScorer: isTopScorer,
+    repeatedReserva: isRepeatedReserva, isJuvenil: cat.type==='juvenil',
   };
   p.pj+=pj; p.gls+=gls; p.ast+=ast;
   p.history.push(histRow);
   trophies.forEach(t=>p.trophies.push(t));
   achievements.forEach(a=>p.achievements.push(a));
   if(cat.type==='adulta') p.clubDivisionTier = tierUpdate.newTier;
+  // Se cierra el repechaje: volvés a tu divisional real de Mayores para la temporada siguiente.
+  if(isRepeatedReserva){
+    p.categoryOverrideId = null;
+    p.clubDivisionTier = p._savedAdultTier;
+    p._savedAdultTier = null;
+  }
 
   state.lastResult = histRow;
   state.screen='result';
@@ -846,6 +999,10 @@ function resolveEvent(option){
   state.lastEventNote = p._eventNote;
   finishAdvance(p._attrDelta);
 }
+// Umbral calibrado con una simulación de 3000 carreras hasta los 19 años: el OVR a esa edad
+// va de ~57 a ~75, con promedio ~64.5 y percentil 90 en ~68. 68 deja la oferta profesional
+// reservada más o menos al 10% de mejor nivel para esa edad, no a cualquiera.
+const PRO_OFFER_OVR_THRESHOLD = 68;
 function finishAdvance(extraAttrDelta){
   const p = state.player;
   growAttributes(p, extraAttrDelta||{});
@@ -856,6 +1013,18 @@ function finishAdvance(extraAttrDelta){
   // La única excepción es el pase de Reserva a Mayores: ese salto no es automático "de nombre" nomás,
   // se narra como el llamado del DT de Primera para que el jugador lo sienta como un logro.
   const isCallUpToMayores = nextCat.id==='mayores' && p.lastCategoryId==='reserva';
+  // Salida de Sub 18 hacia Sub 20 (cumplís 19): si tu nivel está muy por encima del promedio para
+  // esa edad, aparece la chance única de irte al fútbol profesional (termina la carrera acá).
+  const isLeavingSub18 = nextCat.id==='sub20' && p.lastCategoryId==='sub18';
+  // Caso muy poco probable: a veces la carrera pega un salto de nivel inesperado justo en el momento
+  // de dejar Sub 18, como para que a algunos jugadores les llegue la chance de ser profesional aunque
+  // su progreso normal no los hubiera dejado cerca del umbral. No pasa siempre, ni cerca.
+  const RARE_PRO_BOOST_CHANCE = 0.08; // subido apenas (antes 0.05): sigue siendo raro, no pasa siempre
+  if(isLeavingSub18 && p.ovr < PRO_OFFER_OVR_THRESHOLD && Math.random() < RARE_PRO_BOOST_CHANCE){
+    p.ovr = clamp(PRO_OFFER_OVR_THRESHOLD + randi(0,4), 0, 99);
+    p.peakOvr = Math.max(p.peakOvr||0, p.ovr);
+    p._rareProBoost = true;
+  }
   if(nextCat.id !== p.lastCategoryId){
     if(nextCat.type==='juvenil'){ p.serieLetter = realSerieLetter(nextCat.id, p.club) || DIV_LETTERS[randi(0,3)]; }
     else {
@@ -869,11 +1038,206 @@ function finishAdvance(extraAttrDelta){
   }
   p.transferSearchUsed = false;
   state.showDetails=false;
-  state.screen = isCallUpToMayores ? 'callup' : 'season';
+  if(isLeavingSub18 && p.ovr >= PRO_OFFER_OVR_THRESHOLD){
+    state.screen = 'proOffer';
+  } else {
+    state.screen = isCallUpToMayores ? 'callup' : 'season';
+  }
   render();
 }
 function continueFromCallup(){ state.screen='season'; render(); }
-function retireNow(){ state.screen='retired'; state.lastLeaderboardRank=null; lbMaybeSubmit(state.player); render(); }
+function stayInLeague(){ state.screen='season'; render(); }
+function goProfessional(){
+  const p = state.player;
+  p.wentPro = true;
+  state.screen='retired';
+  state.lastLeaderboardRank=null;
+  state.lastTitlesLeaderboardRank=null;
+  lbMaybeSubmit(p);
+  tbMaybeSubmit(p);
+  render();
+}
+function retireNow(){
+  state.screen='retired';
+  state.lastLeaderboardRank=null;
+  state.lastTitlesLeaderboardRank=null;
+  lbMaybeSubmit(state.player);
+  tbMaybeSubmit(state.player);
+  render();
+}
+
+/* ================= MODO DT (después de colgar los botines) =================
+   Al terminar tu carrera como jugador (retiro normal o pase al profesionalismo), podés
+   dirigir las juveniles del último club en el que jugaste. Reutiliza las MISMAS funciones de
+   simulación de tabla ya probadas (simulateStandingsJuvenil / simulateStandingsAdulta) que usa
+   el modo jugador, tratando tu "nivel de DT" como si fuera el OVR de un plantel. */
+function coachRatingSeed(p){
+  const liderazgo = (p.attrs && p.attrs.liderazgo) ? p.attrs.liderazgo : 50;
+  return clamp(Math.round((p.peakOvr + liderazgo)/2), 35, 82);
+}
+function startCoaching(){
+  const p = state.player;
+  if(p.wentPro){ return; } // si te fuiste al profesionalismo, tu paso por la Liga terminó del todo
+  const club = p.club || (p.clubsPlayed.length ? p.clubsPlayed[p.clubsPlayed.length-1] : 'un club');
+  // Dos decisiones especiales, cada una en UN solo año de los 5 (no todos los años), sorteadas
+  // sin repetirse entre sí: una sobre si traer un crack al plantel, otra sobre cómo manejar la
+  // lesión grave de un juvenil clave.
+  const pickedYears = shuffle([1,2,3,4,5]);
+  const mayoresCat = CATEGORIES.find(cat=>cat.id==='mayores');
+  const divisionTier = tierInCategory(clubOf(club).tier, mayoresCat.divisions);
+  p.coach = {
+    club,
+    rating: coachRatingSeed(p),
+    year: 0,          // años dirigidos en juveniles (0 a 5)
+    phase: 'juveniles', // 'juveniles' | 'primera' | 'done'
+    trophies: [],
+    lastResultNote: null,
+    nextSeasonChampionMod: 0, // empujón/castigo puntual de UNA temporada, por una decisión
+    lastSigningNote: null,
+    lastInjuryNote: null,
+    signingYear: pickedYears[0],
+    injuryDecisionYear: pickedYears[1],
+    // Solo informativo (para mostrar contexto): en juveniles competís por Serie, en Primera
+    // por Divisional. No afecta las probabilidades de ser campeón, que son las ya calibradas.
+    serieLetter: realSerieLetter('sub18', club) || DIV_LETTERS[randi(0,3)],
+    divisionTier,
+    divisionLabel: 'Divisional '+DIV_LETTERS[divisionTier],
+  };
+  state.screen = 'coachHub';
+  render();
+}
+// Antes de cada temporada en juveniles, se pregunta si querés traer una figura para reforzar el
+// plantel. Es un albur real: puede potenciar al equipo o generar roces si el resto del plantel
+// no lo toma bien. El efecto es chico y dura SOLO esa temporada (no acumula para siempre).
+function coachOfferSigning(){
+  state.screen = 'coachSigningOffer';
+  render();
+}
+function coachPlainSeason(){
+  const c = state.player.coach;
+  c.lastSigningNote = null;
+  c.lastInjuryNote = null;
+  coachPlaySeason();
+}
+function coachSigningYes(){
+  const c = state.player.coach;
+  c.lastInjuryNote = null;
+  if(Math.random()<0.5){
+    c.nextSeasonChampionMod = 0.08;
+    c.rating = clamp(c.rating+2, 30, 90);
+    c.lastSigningNote = 'El plantel recibió bien a la nueva figura: mejoró el nivel general del equipo.';
+  } else {
+    c.nextSeasonChampionMod = -0.08;
+    c.rating = clamp(c.rating-2, 30, 90);
+    c.lastSigningNote = 'La llegada de la figura generó roces en el plantel: el grupo se resintió.';
+  }
+  coachPlaySeason();
+}
+function coachSigningNo(){
+  const c = state.player.coach;
+  c.lastInjuryNote = null;
+  c.nextSeasonChampionMod = 0;
+  c.lastSigningNote = 'Preferiste no arriesgar la armonía del grupo y seguir con el plantel tal cual estaba.';
+  coachPlaySeason();
+}
+// Segunda decisión, en OTRO año distinto al del fichaje: la lesión grave de un juvenil clave.
+function coachOfferInjuryDecision(){
+  state.screen = 'coachInjuryOffer';
+  render();
+}
+function coachInjuryYes(){
+  const c = state.player.coach;
+  c.lastSigningNote = null;
+  if(Math.random()<0.5){
+    c.nextSeasonChampionMod = (c.nextSeasonChampionMod||0) + 0.05;
+    c.rating = clamp(c.rating+1, 30, 90);
+    c.lastInjuryNote = 'El reemplazo transitorio se acopló bien al plantel y el equipo no sintió la ausencia.';
+  } else {
+    c.nextSeasonChampionMod = (c.nextSeasonChampionMod||0) - 0.05;
+    c.rating = clamp(c.rating-1, 30, 90);
+    c.lastInjuryNote = 'El reemplazo costó integrarse y el equipo sintió la ausencia del titular lesionado.';
+  }
+  coachPlaySeason();
+}
+function coachInjuryNo(){
+  const c = state.player.coach;
+  c.lastSigningNote = null;
+  c.nextSeasonChampionMod = (c.nextSeasonChampionMod||0) - 0.03;
+  c.lastInjuryNote = 'Decidiste esperar su recuperación sin fichar a nadie: el plantel quedó corto esa temporada.';
+  coachPlaySeason();
+}
+// Probabilidades explícitas de ser campeón como DT (no dependen de la simulación de tablas del
+// modo jugador): en juveniles, 40% cada año; en tu único año en la Primera, 20%. Cuando no salís
+// campeón, igual se sortea al azar qué tan bien o mal te fue, para variar el relato.
+const COACH_JUVENILES_CHAMPION_CHANCE = 0.25;
+const COACH_PRIMERA_CHAMPION_CHANCE = 0.1;
+function coachPlaySeason(){
+  const p = state.player;
+  const c = p.coach;
+  if(c.phase==='juveniles'){
+    c.year += 1;
+    const effectiveChance = clamp(COACH_JUVENILES_CHAMPION_CHANCE + (c.nextSeasonChampionMod||0), 0.05, 0.6);
+    const isChampion = Math.random() < effectiveChance;
+    c.nextSeasonChampionMod = 0; // el empujón del fichaje dura una sola temporada
+    let tier, delta, note;
+    // Si no salís campeón, no te llevás ninguna copa: se sortea el relato de la temporada
+    // (buena/pareja/floja) solo para variar el humor del año, sin adjudicarte ningún título.
+    if(isChampion){
+      tier='campeon'; delta=3;
+      note='¡Temporada redonda! Fuiste campeón de la Copa de Oro con las juveniles de '+c.club+'.';
+      c.trophies.push('Campeón de Copa de Oro — Juveniles, Año '+c.year);
+    } else {
+      const r = Math.random();
+      if(r<0.35){ tier='buena'; delta=1; note='Buena campaña con las juveniles de '+c.club+', pero no alcanzó para ser campeón.'; }
+      else if(r<0.65){ tier='irregular'; delta=0; note='Campaña pareja con las juveniles de '+c.club+': ni tan bien ni tan mal, sin título esta vez.'; }
+      else if(r<0.85){ tier='floja'; delta=-1; note='Año flojo con las juveniles de '+c.club+', lejos de pelear el título.'; }
+      else { tier='muyfloja'; delta=-1; note='Temporada floja, mucho para corregir de cara al año que viene.'; }
+    }
+    c.rating = clamp(c.rating+delta, 30, 90);
+    c.lastResultNote = note;
+    c.lastResultTier = tier;
+  } else if(c.phase==='primera'){
+    const isChampion = Math.random() < COACH_PRIMERA_CHAMPION_CHANCE;
+    let tierRes, note;
+    if(isChampion){
+      tierRes='campeon';
+      note='¡CAMPEÓN! Dirigiste a '+c.club+' a lo más alto en la '+c.divisionLabel+', tu único año en Primera.';
+      c.trophies.push('Campeón de Liga como DT de Primera');
+    } else {
+      const r = Math.random();
+      if(r<0.4){ tierRes='buena'; note='Gran año: terminaste peleando arriba de la tabla con la Primera de '+c.club+' en la '+c.divisionLabel+'.'; }
+      else if(r<0.75){ tierRes='correcta'; note='Campaña correcta con la Primera de '+c.club+' en la '+c.divisionLabel+', sin sobresaltos.'; }
+      else { tierRes='dificil'; note='Año difícil: peleaste el descenso hasta el final con la Primera de '+c.club+' en la '+c.divisionLabel+'.'; }
+    }
+    c.lastResultNote = note;
+    c.lastResultTier = tierRes;
+    c.phase = 'done';
+  }
+  state.screen = 'coachResult';
+  render();
+}
+function coachAdvance(){
+  const c = state.player.coach;
+  if(c.phase==='done'){
+    state.screen = 'coachFinal';
+  } else if(c.phase==='juveniles' && c.year>=5){
+    state.screen = 'coachPrimeraOffer';
+  } else {
+    state.screen = 'coachHub';
+  }
+  render();
+}
+function acceptPrimeraCoach(){
+  state.player.coach.phase = 'primera';
+  state.screen = 'coachHub';
+  render();
+}
+function declineCoachAfterJuveniles(){
+  state.player.coach.phase = 'done';
+  state.screen = 'coachFinal';
+  render();
+}
+
 function toggleDetails(){ state.showDetails = !state.showDetails; render(); }
 
 // Mercado de pases realista:
@@ -1303,6 +1667,9 @@ function render(){
     result:renderResult, event:renderEvent, transfer:renderTransfer, retired:renderRetired,
     rules:renderRules, callup:renderCallup, instagram:renderInstagram,
     press:renderPress, pressResult:renderPressResult, leaderboard:renderLeaderboard,
+    proOffer:renderProOffer, coachHub:renderCoachHub, coachResult:renderCoachResult, coachSigningOffer:renderCoachSigningOffer,
+    coachInjuryOffer:renderCoachInjuryOffer,
+    coachPrimeraOffer:renderCoachPrimeraOffer, coachFinal:renderCoachFinal,
   })[state.screen]();
   bindEvents();
 }
@@ -1395,6 +1762,12 @@ function renderLeaderboard(){
   <p class="muted" style="max-width:600px;">El ranking global de mayor nivel (media máxima / OVR pico) alcanzado por cualquier jugador, de cualquier navegador, desde que existe LIGUERO.</p>
   <div class="card">
     <div id="lbList"><p class="muted" style="font-size:13px;">Cargando el ranking global...</p></div>
+  </div>
+  <div class="eyebrow" style="margin-top:18px;">Historia de la Liga</div>
+  <h2>🏅 Top 3 de máximos ganadores de títulos</h2>
+  <p class="muted" style="max-width:600px;">El ranking global de quien más títulos sumó en su carrera (Liga + Copas + Campeonato de Honor), de cualquier navegador, desde que existe LIGUERO.</p>
+  <div class="card">
+    <div id="tbList"><p class="muted" style="font-size:13px;">Cargando el ranking global...</p></div>
   </div>
   <button class="btn secondary" data-action="backFromLeaderboard">Volver</button>
   `;
@@ -1530,10 +1903,12 @@ function renderHistoryTable(p){
       <td>${h.edad}</td>
       <td>${h.club}<br><span class="muted" style="font-size:11px;">${h.categoria} · ${h.tierLabel}</span></td>
       <td>${h.ovr}</td>
-      <td>${h.posFinal}º</td>
+      <td>${h.lostSeason ? '—' : h.posFinal+'º'}</td>
       <td>${h.gls}</td>
       <td>${h.ast}</td>
       <td>
+        ${h.lostSeason ? `<span class="tag">✈️ Intercambio</span>` : ''}
+        ${h.repeatedReserva ? `<span class="tag">↩️ Repite Reserva</span>` : ''}
         ${h.tierDir ? `<span class="tag ${h.tierDir==='up'?'up':'down'}">${h.tierDir==='up'?'Ascenso':'Descenso'}</span>` : ''}
         ${h.posFinal===1 ? `<span class="tag oro">Liga</span>` : ''}
         ${h.cupChamp ? `<span class="tag ${h.cupLabel==='Copa de Oro'?'oro':h.cupLabel==='Copa de Plata'?'plata':h.cupLabel==='Copa de Bronce'?'bronce':'confrat'}">${h.cupLabel}</span>` : ''}
@@ -1678,7 +2053,9 @@ function renderResult(){
   const p = state.player;
   const h = state.lastResult;
   let trophyBlocks = '';
-  if(h.posFinal===1){
+  // "Campeón de Liga" solo existe en categorías adultas: en juveniles, ganar la Serie únicamente
+  // define a qué Copa entrás, no te hace campeón de nada por sí solo.
+  if(h.posFinal===1 && !h.isJuvenil){
     trophyBlocks += `<div class="trophy-anim"><div class="icon">${trophySVG('liga')}</div><div class="label">Campeón de Liga</div></div>`;
   }
   if(h.cupChamp){
@@ -1700,7 +2077,10 @@ function renderResult(){
   <h2>Temporada cerrada</h2>
   <div class="card">
     ${trophyBlocks}
-    <p>Terminaste <strong>${h.posFinal}º</strong> en ${h.tierLabel} con <strong>${p.club}</strong>.</p>
+    ${h.lostSeason
+      ? `<p>✈️ Te fuiste de intercambio académico: no jugaste ni un partido esta temporada con <strong>${p.club}</strong>.</p>`
+      : `<p>Terminaste <strong>${h.posFinal}º</strong> en ${h.tierLabel} con <strong>${p.club}</strong>.</p>`}
+    ${h.repeatedReserva ? `<p class="muted" style="font-size:12px;">↩️ Por el intercambio, este año lo repetiste en Reserva antes de volver a Mayores.</p>` : ''}
     <div class="stat-grid">
       <div class="stat-box"><div class="v">${h.pj}</div><div class="l">PJ</div></div>
       <div class="stat-box"><div class="v">${h.gls}</div><div class="l">Goles</div></div>
@@ -1767,6 +2147,138 @@ function renderCallup(){
   `;
 }
 
+function renderCoachHub(){
+  const p = state.player, c = p.coach;
+  const isPrimera = c.phase==='primera';
+  const nextYear = c.year+1;
+  const nextAction = isPrimera ? 'coachPlaySeason'
+    : (nextYear===c.signingYear ? 'coachOfferSigning'
+    : (nextYear===c.injuryDecisionYear ? 'coachOfferInjuryDecision' : 'coachPlainSeason'));
+  const contextLabel = isPrimera ? c.divisionLabel : 'Serie '+c.serieLetter;
+  return `
+  <div class="eyebrow">${isPrimera ? 'Un año en Primera' : 'Dirigiendo las Juveniles'}</div>
+  <h2>${isPrimera ? 'DT de la Primera de '+c.club : 'Año '+(c.year+1)+' de 5 · Juveniles de '+c.club}</h2>
+  <div class="card">
+    <p class="muted" style="margin:0 0 6px;font-size:13px;">Competís en <strong>${contextLabel}</strong>${isPrimera ? '' : ' (Copas de Oro, Plata, Bronce y Confraternidad según cómo termine la temporada)'}.</p>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="v">${c.rating}</div><div class="l">Nivel de DT</div></div>
+      <div class="stat-box"><div class="v">${isPrimera ? '1 de 1' : c.year+' de 5'}</div><div class="l">Años dirigidos</div></div>
+      <div class="stat-box"><div class="v">${c.trophies.length}</div><div class="l">Logros como DT</div></div>
+    </div>
+    <p class="muted" style="font-size:13px;margin-top:10px;">${isPrimera
+      ? 'Tu única temporada al mando del primer equipo. Todo lo que construiste en las juveniles te trajo hasta acá.'
+      : 'Cada temporada que dirigís puede mejorar (o complicar) tu nivel como DT, según cómo le vaya al equipo.'}</p>
+    ${c.trophies.length ? `<h3 style="font-size:15px;margin-top:14px;">Logros</h3>${renderTrophies({trophies:c.trophies})}` : ''}
+  </div>
+  <button class="btn gold" data-action="${nextAction}">Dirigir la temporada</button>
+  `;
+}
+function renderCoachResult(){
+  const c = state.player.coach;
+  return `
+  <div class="eyebrow">Fin de temporada como DT</div>
+  <h2>Resultado</h2>
+  <div class="card">
+    ${c.lastResultTier==='campeon' ? `<div class="trophy-anim small"><div class="icon">${trophySVG('liga')}</div><div class="label">Campeón como DT</div></div>` : ''}
+    ${c.phase==='juveniles' && c.lastSigningNote ? `<p class="muted" style="font-size:13px;">🧢 ${c.lastSigningNote}</p>` : ''}
+    ${c.phase==='juveniles' && c.lastInjuryNote ? `<p class="muted" style="font-size:13px;">🩹 ${c.lastInjuryNote}</p>` : ''}
+    <p>${c.lastResultNote}</p>
+    <p class="muted" style="font-size:13px;">Nivel de DT actual: <strong>${c.rating}</strong></p>
+  </div>
+  <button class="btn gold" data-action="coachAdvance">Continuar</button>
+  `;
+}
+function renderCoachSigningOffer(){
+  const c = state.player.coach;
+  return `
+  <div class="eyebrow">Antes de la temporada</div>
+  <h2>¿Traer algún crack para el plantel?</h2>
+  <div class="event-box">
+    <p>Se te presenta la chance de sumar una figura al plantel juvenil de <strong>${c.club}</strong>
+    de cara a esta temporada. Puede potenciar al equipo... o generar roces si el resto del plantel
+    no lo recibe bien.</p>
+    <p class="muted" style="font-size:12px;">Es un albur: no sabés de antemano cómo va a reaccionar el grupo.</p>
+    <div class="row">
+      <button class="btn gold" data-action="coachSigningYes">Sí, traer la figura</button>
+      <button class="btn secondary" data-action="coachSigningNo">No, mantener el plantel como está</button>
+    </div>
+  </div>
+  `;
+}
+function renderCoachInjuryOffer(){
+  const c = state.player.coach;
+  return `
+  <div class="eyebrow">Antes de la temporada</div>
+  <h2>Se lesionó un juvenil clave del plantel</h2>
+  <div class="event-box">
+    <p>Uno de los jugadores clave del plantel juvenil de <strong>${c.club}</strong> sufrió una lesión
+    grave (rotura de ligamento cruzado) justo antes de arrancar la temporada. ¿Cómo lo manejás?</p>
+    <p class="muted" style="font-size:12px;">Traer un reemplazo transitorio es otro albur: puede acoplarse bien o costarle integrarse.</p>
+    <div class="row">
+      <button class="btn gold" data-action="coachInjuryYes">Conseguir un reemplazo transitorio</button>
+      <button class="btn secondary" data-action="coachInjuryNo">Esperar su recuperación, sin fichar a nadie</button>
+    </div>
+  </div>
+  `;
+}
+function renderCoachPrimeraOffer(){
+  const c = state.player.coach;
+  return `
+  <div class="eyebrow">Un nuevo desafío</div>
+  <h2>La dirigencia de ${c.club} te quiere en la Primera</h2>
+  <div class="event-box" style="text-align:center;">
+    <div class="trophy-anim"><div class="icon" style="font-size:52px;">🧢</div></div>
+    <p>Después de 5 años al mando de las juveniles de <strong>${c.club}</strong> (nivel de DT: <strong>${c.rating}</strong>),
+    la dirigencia decidió darte la chance de dirigir el primer equipo por una temporada.</p>
+    <p class="muted" style="font-size:12px;">Es una sola temporada, todo o nada. Si preferís, también podés retirarte
+    acá, con tu paso por las juveniles como legado.</p>
+  </div>
+  <div class="row">
+    <button class="btn gold" data-action="acceptPrimeraCoach">Aceptar el desafío</button>
+    <button class="btn secondary" data-action="declineCoachAfterJuveniles">Retirarme como DT de juveniles</button>
+  </div>
+  `;
+}
+function renderCoachFinal(){
+  const p = state.player, c = p.coach;
+  return `
+  <div class="eyebrow">Fin del ciclo como DT</div>
+  <h2>Así fue tu carrera dirigiendo a ${c.club}</h2>
+  <div class="card">
+    <div class="stat-grid">
+      <div class="stat-box"><div class="v">${c.rating}</div><div class="l">Nivel final de DT</div></div>
+      <div class="stat-box"><div class="v">${c.phase==='done' && c.trophies.some(t=>t.includes('Primera'))? 'Sí' : 'No'}</div><div class="l">Dirigió la Primera</div></div>
+      <div class="stat-box"><div class="v">${c.trophies.length}</div><div class="l">Logros como DT</div></div>
+    </div>
+    <h3 style="font-size:15px;margin-top:14px;">Legado como DT</h3>
+    ${renderTrophies({trophies:c.trophies})}
+  </div>
+  <button class="btn gold" data-action="restart">Volver al inicio</button>
+  `;
+}
+
+function renderProOffer(){
+  const p = state.player;
+  return `
+  <div class="eyebrow">Una oportunidad única</div>
+  <h2>¿Conseguís un representante y te vas al profesionalismo?</h2>
+  <div class="event-box" style="text-align:center;">
+    <div class="trophy-anim"><div class="icon" style="font-size:52px;">✈️</div></div>
+    <p>Terminaste tu paso por Sub 18 en <strong>${p.club}</strong> con un nivel muy por encima del
+    promedio para tu edad (<strong>${Math.round(p.ovr)} OVR</strong>). Tenés la chance de conseguir un
+    representante y probar suerte en el fútbol profesional.</p>
+    ${p._rareProBoost ? `<p class="muted" style="font-size:12px;">🌟 Diste un salto de nivel inesperado justo en el momento indicado.</p>` : ''}
+    <p class="muted" style="font-size:12px;">Si lo conseguís y das el salto, tu carrera en la Liga
+    Universitaria termina acá: un camino que queda fuera de este juego. Si preferís, también podés
+    quedarte y seguir tu carrera acá, en Sub 20 y en adelante.</p>
+  </div>
+  <div class="row">
+    <button class="btn gold" data-action="goProfessional">Conseguir representante e irme</button>
+    <button class="btn secondary" data-action="stayInLeague">Seguir en la Universitaria</button>
+  </div>
+  `;
+}
+
 function renderTransfer(){
   return `
   <h2>Mercado de pases</h2>
@@ -1789,14 +2301,19 @@ function renderRetired(){
   const c = p.career;
   const avgGpg = p.pj>0 ? (p.gls/p.pj).toFixed(2) : '0.00';
   return `
-  <div class="eyebrow">Fin de carrera</div>
-  <h2>${p.apellido} se retira</h2>
+  <div class="eyebrow">${p.wentPro ? 'Fin de tu paso por la Liga Universitaria' : 'Fin de carrera'}</div>
+  <h2>${p.wentPro ? p.apellido+' firma su contrato profesional' : p.apellido+' se retira'}</h2>
+  ${p.wentPro ? `<div class="disclaimer">👋 En <strong>${p.club || (p.clubsPlayed.length?p.clubsPlayed[p.clubsPlayed.length-1]:'tu club')}</strong> te desean la mejor de las suertes en el fútbol profesional.</div>` : ''}
   ${state.lastLeaderboardRank ? `<div class="disclaimer" style="border-color:var(--gold-soft);background:var(--gold-soft);color:var(--gold-text);font-weight:600;">🎉 ¡Entraste al Top 3 histórico de la Liga! Puesto ${state.lastLeaderboardRank} con OVR ${Math.round(p.peakOvr)}.</div>` : ''}
+  ${state.lastTitlesLeaderboardRank ? `<div class="disclaimer" style="border-color:var(--gold-soft);background:var(--gold-soft);color:var(--gold-text);font-weight:600;">🏅 ¡Entraste al Top 3 histórico de máximos ganadores de títulos! Puesto ${state.lastTitlesLeaderboardRank} con ${totalTitlesFor(p)} título${totalTitlesFor(p)===1?'':'s'}.</div>` : ''}
   <div class="row" style="margin-bottom:14px;">
     <button class="btn gold" id="shareCareerBtn" data-action="shareCareer">📤 Compartir mi carrera</button>
     <button class="btn secondary" data-action="viewInstagram">📱 Ver mi Instagram</button>
     <button class="btn secondary" data-action="viewLeaderboard">🏆 Ver Top 3 histórico</button>
   </div>
+  ${!p.wentPro ? `<div class="row" style="margin-bottom:14px;">
+    <button class="btn secondary" data-action="startCoaching">🧢 Dirigir las juveniles de ${p.club || (p.clubsPlayed.length ? p.clubsPlayed[p.clubsPlayed.length-1] : 'tu club')}</button>
+  </div>` : ''}
   <div class="card">
     <p class="muted" style="margin:0;">Última temporada: ${p.history.length? p.history[p.history.length-1].categoria : '—'} · Pico de nivel: <span class="badge-ovr">${Math.round(p.peakOvr)}</span></p>
     <div class="stat-grid">
@@ -1861,8 +2378,22 @@ function bindEvents(){
       else if(action==='pressStart'){ startPressInterview(); }
       else if(action==='pressAnswer'){ resolvePressAnswer(parseInt(el.getAttribute('data-qidx')), parseInt(el.getAttribute('data-aidx'))); }
       else if(action==='pressContinue'){ advanceAfterResult(); }
-      else if(action==='viewLeaderboard'){ state.leaderboardReturnScreen = state.screen; state.screen='leaderboard'; render(); loadLeaderboardIntoDOM(); }
+      else if(action==='viewLeaderboard'){ state.leaderboardReturnScreen = state.screen; state.screen='leaderboard'; render(); loadLeaderboardIntoDOM(); loadTitlesLeaderboardIntoDOM(); }
       else if(action==='backFromLeaderboard'){ state.screen = state.leaderboardReturnScreen || 'home'; render(); }
+      else if(action==='goProfessional'){ goProfessional(); }
+      else if(action==='stayInLeague'){ stayInLeague(); }
+      else if(action==='startCoaching'){ startCoaching(); }
+      else if(action==='coachPlaySeason'){ coachPlaySeason(); }
+      else if(action==='coachAdvance'){ coachAdvance(); }
+      else if(action==='acceptPrimeraCoach'){ acceptPrimeraCoach(); }
+      else if(action==='declineCoachAfterJuveniles'){ declineCoachAfterJuveniles(); }
+      else if(action==='coachOfferSigning'){ coachOfferSigning(); }
+      else if(action==='coachSigningYes'){ coachSigningYes(); }
+      else if(action==='coachSigningNo'){ coachSigningNo(); }
+      else if(action==='coachPlainSeason'){ coachPlainSeason(); }
+      else if(action==='coachOfferInjuryDecision'){ coachOfferInjuryDecision(); }
+      else if(action==='coachInjuryYes'){ coachInjuryYes(); }
+      else if(action==='coachInjuryNo'){ coachInjuryNo(); }
     });
   });
 }
@@ -2023,6 +2554,67 @@ async function loadLeaderboardIntoDOM(){
     ).join('');
   }catch(e){
     const freshEl = document.getElementById('lbList');
+    if(freshEl) freshEl.innerHTML = '<p class="muted" style="font-size:13px;">No se pudo cargar el ranking ahora. Probá de nuevo más tarde.</p>';
+  }
+}
+
+// ===== Top 3 histórico de máximos ganadores de títulos (Liga + Copas + Honor, suma de toda la carrera) =====
+const TB_KEY_PREFIX = 'liguero_lud_santiago_geisinger_titles_top';
+function tbKey(slot, field){ return TB_KEY_PREFIX+slot+'_'+field; }
+function totalTitlesFor(p){ return p.career.ligaTitles+p.career.honorTitles+p.career.copaOro+p.career.copaPlata+p.career.copaBronce+p.career.copaConfraternidad; }
+async function tbFetchSlot(slot){
+  const [titles, nameNum, clubNum] = await Promise.all([
+    fetchGlobalCount(tbKey(slot,'titles')),
+    fetchGlobalCount(tbKey(slot,'name')),
+    fetchGlobalCount(tbKey(slot,'club')),
+  ]);
+  return { titles: titles||0, nameNum: nameNum||0, clubIdx: (clubNum===null||clubNum===undefined) ? -1 : clubNum };
+}
+async function tbSetSlot(slot, entry){
+  await Promise.all([
+    lbSetCount(tbKey(slot,'titles'), entry.titles),
+    lbSetCount(tbKey(slot,'name'), entry.nameNum),
+    lbSetCount(tbKey(slot,'club'), entry.clubIdx),
+  ]);
+}
+async function tbFetchTop3(){
+  const slots = await Promise.all([1,2,3].map(s=>tbFetchSlot(s)));
+  return slots.map(s => s.titles>0 ? { titles:s.titles, name: lbDecodeName(s.nameNum), club: lbClubName(s.clubIdx) } : null);
+}
+// Igual que lbMaybeSubmit: se llama solo al terminar la carrera (retiro o pase a profesional),
+// cuando la cantidad de títulos ya es definitiva. No bloquea la pantalla de retiro.
+async function tbMaybeSubmit(p){
+  const newTitles = Math.round(totalTitlesFor(p));
+  if(newTitles<=0) return;
+  try{
+    const slots = await Promise.all([1,2,3].map(s=>tbFetchSlot(s)));
+    let insertAt = -1;
+    for(let i=0;i<3;i++){ if(newTitles > (slots[i].titles||0)){ insertAt = i; break; } }
+    if(insertAt===-1) return;
+    const entries = slots.map(s=>({titles:s.titles, nameNum:s.nameNum, clubIdx:s.clubIdx}));
+    entries.splice(insertAt, 0, { titles:newTitles, nameNum: lbEncodeName(p.apellido), clubIdx: lbClubIndex(p.club) });
+    entries.length = 3;
+    await Promise.all(entries.map((e,i)=>tbSetSlot(i+1, e)));
+    if(state.player===p && state.screen==='retired'){
+      state.lastTitlesLeaderboardRank = insertAt+1;
+      render();
+    }
+  }catch(e){ /* si falla la red, el resto del juego sigue funcionando igual */ }
+}
+async function loadTitlesLeaderboardIntoDOM(){
+  const el = document.getElementById('tbList');
+  if(!el) return;
+  try{
+    const top3 = await tbFetchTop3();
+    const freshEl = document.getElementById('tbList');
+    if(!freshEl) return;
+    const medals = ['🥇','🥈','🥉'];
+    freshEl.innerHTML = top3.map((e,i)=> e
+      ? `<div class="trophy-item">${medals[i]} <span style="font-size:14px;"><strong>${e.name}</strong> — ${e.titles} título${e.titles===1?'':'s'} · ${e.club}</span></div>`
+      : `<div class="trophy-item">${medals[i]} <span class="muted" style="font-size:13px;">Todavía nadie llegó a este puesto.</span></div>`
+    ).join('');
+  }catch(e){
+    const freshEl = document.getElementById('tbList');
     if(freshEl) freshEl.innerHTML = '<p class="muted" style="font-size:13px;">No se pudo cargar el ranking ahora. Probá de nuevo más tarde.</p>';
   }
 }
