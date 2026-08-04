@@ -47,6 +47,9 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
   @media(max-width:640px){.grid2{grid-template-columns:1fr;}}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+  @media(max-width:900px){.grid3{grid-template-columns:1fr 1fr;}}
+  @media(max-width:640px){.grid3{grid-template-columns:1fr;}}
   input[type=text],input[type=number],select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px 12px;font-family:'Inter';font-size:14px;outline:none;}
   textarea{resize:vertical;min-height:70px;}
   input:focus,select:focus,textarea:focus{border-color:var(--gold);}
@@ -433,10 +436,6 @@ const PS_CHAMPION_LINES = [
   '🥑 PUNTO SANO, el snack oficial de los campeones de la Liga.',
 ];
 function psChampionLine(){ return PS_CHAMPION_LINES[Math.floor(Math.random()*PS_CHAMPION_LINES.length)]; }
-// Elige al azar cuál de los dos sponsors se lleva la frase de campeón en cada título: así
-// ninguno de los dos se queda siempre en un segundo plano frente al otro.
-function sponsorChampionLine(){ return Math.random()<0.5 ? vcpChampionLine() : psChampionLine(); }
-
 function renderPsQuestionBadge(){
   return `<div style="display:flex;align-items:center;gap:7px;">
     <img src="${PS_LOGO}" alt="Punto Sano" style="height:24px;border-radius:5px;">
@@ -449,6 +448,7 @@ function renderSponsorsQuestionBadge(){
   return `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px;">
     ${renderVcpQuestionBadge().replace('margin-bottom:10px;','')}
     ${renderPsQuestionBadge()}
+    ${renderBtQuestionBadge()}
   </div>`;
 }
 
@@ -473,8 +473,11 @@ function renderSponsorsFooter(){
       <a href="${PS_URL}" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;line-height:0;">
         <img src="${PS_LOGO}" alt="Punto Sano" style="height:26px;border-radius:5px;">
       </a>
+      <a href="${BT_URL}" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;line-height:0;">
+        <img src="${BT_LOGO}" alt="Burger Time" style="height:26px;border-radius:5px;">
+      </a>
     </div>
-    <span style="font-size:11.5px;color:#8a8a8a;">Sponsors oficiales: <a href="${VCP_URL}" target="_blank" rel="noopener noreferrer" style="color:#666;font-weight:700;text-decoration:none;">VCP</a> 👕 y <a href="${PS_URL}" target="_blank" rel="noopener noreferrer" style="color:#666;font-weight:700;text-decoration:none;">Punto Sano</a> 🥗</span>
+    <span style="font-size:11.5px;color:#8a8a8a;">Sponsors oficiales: <a href="${VCP_URL}" target="_blank" rel="noopener noreferrer" style="color:#666;font-weight:700;text-decoration:none;">VCP</a> 👕 · <a href="${PS_URL}" target="_blank" rel="noopener noreferrer" style="color:#666;font-weight:700;text-decoration:none;">Punto Sano</a> 🥗 · <a href="${BT_URL}" target="_blank" rel="noopener noreferrer" style="color:#666;font-weight:700;text-decoration:none;">Burger Time</a> 🍔</span>
     <button data-action="viewSponsorsCoupon" class="btn secondary" style="padding:4px 10px;font-size:11px;margin-left:auto;">🎟️ Mis cupones</button>
   </div>`;
 }
@@ -547,6 +550,111 @@ function renderSponsorsCoupon(){
   <p class="muted" style="font-size:12px;max-width:640px;margin:14px auto 0;text-align:center;">Códigos únicos de la promo: usalos una sola vez por persona.</p>
   <button class="btn gold" data-action="${isRevisit ? 'backFromSponsorsCoupon' : 'continueFromSponsorsCoupon'}">${isRevisit ? 'Volver' : 'Continuar mi carrera'}</button>
   `;
+}
+
+/* ================= SPONSOR: BURGER TIME ================= */
+// Tercer sponsor oficial, a la par de VCP y Punto Sano (los tres en igualdad, ninguno tapa a
+// los otros). Logo embebido tal cual, sin editar. A diferencia de los otros dos, BURGER TIME
+// NO tiene cupón de descuento — no se agrega nada de cupón para este sponsor.
+const BT_LOGO = 'data:image/png;base64,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';
+const BT_URL = 'https://burgertime.com.uy/';
+const BT_IG_URL = 'https://www.instagram.com/burgertimeuy/';
+const BT_LOCATIONS = ['Prado','Ciudad de la Costa','Arocena','Pocitos','Punta Shopping','Gorlero'];
+
+const BT_CHAMPION_LINES = [
+  '🍔 Título festejado con una BURGER TIME.',
+  '🍔 Después de este título, hamburguesa de campeón en BURGER TIME.',
+  '🍔 BURGER TIME, la hamburguesería oficial de los campeones de la Liga.',
+];
+function btChampionLine(){ return BT_CHAMPION_LINES[Math.floor(Math.random()*BT_CHAMPION_LINES.length)]; }
+// Ahora la frase de campeón se reparte entre los TRES sponsors por igual (antes solo entre
+// VCP y Punto Sano), para que ninguno de los tres quede relegado frente a los otros.
+function sponsorChampionLine(){
+  const r = Math.random();
+  if(r < 1/3) return vcpChampionLine();
+  if(r < 2/3) return psChampionLine();
+  return btChampionLine();
+}
+
+function renderBtQuestionBadge(){
+  return `<div style="display:flex;align-items:center;gap:7px;">
+    <img src="${BT_LOGO}" alt="Burger Time" style="height:24px;border-radius:5px;">
+    <span style="font-size:11px;color:#444;font-weight:700;">y BURGER TIME</span>
+  </div>`;
+}
+
+let _btLogoImgCache = null;
+function getBtLogoImg(){
+  if(typeof Image === 'undefined') return null;
+  if(!_btLogoImgCache){
+    _btLogoImgCache = new Image();
+    _btLogoImgCache.src = BT_LOGO;
+  }
+  return _btLogoImgCache;
+}
+
+// Bloque de presentación de Burger Time para la pantalla de inicio (junto a VCP y Punto Sano,
+// los tres en igualdad de condiciones): logo, locales y links a la web e Instagram. Sin nada de
+// cupón/descuento para este sponsor.
+function renderBtInfo(){
+  const locs = BT_LOCATIONS.map(l=>`<span style="display:inline-block;background:#f2f2f2;border-radius:20px;padding:4px 12px;margin:2px 4px 2px 0;font-size:11.5px;font-weight:600;color:#444;">📍 ${l}</span>`).join('');
+  return `
+  <div class="card" style="margin-top:0;">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap;">
+      <a href="${BT_URL}" target="_blank" rel="noopener noreferrer" style="line-height:0;">
+        <img src="${BT_LOGO}" alt="Burger Time" style="height:64px;border-radius:8px;">
+      </a>
+      <div>
+        <div style="font-weight:700;font-size:15px;">También sponsor oficial de LIGUERO</div>
+        <div style="font-size:12px;color:#777;">🍔 La mejor hamburguesería del país</div>
+      </div>
+    </div>
+    <div style="margin-bottom:12px;">${locs}</div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">Web</div>
+        <a href="${BT_URL}" target="_blank" rel="noopener noreferrer" style="font-size:12.5px;color:#2a4d8f;font-weight:600;">burgertime.com.uy</a>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">Instagram</div>
+        <a href="${BT_IG_URL}" target="_blank" rel="noopener noreferrer" style="font-size:12.5px;color:#2a4d8f;font-weight:600;">@burgertimeuy</a>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+/* ================= FARRA (vida nocturna, flavor text) ================= */
+// No es un sponsor con logo constante como los otros tres: es un guiño narrativo. Desde los 24
+// años, de vez en cuando aparece una mención de que el jugador anduvo de noche, y cuando sale
+// campeón a esa edad (o más), a veces la narración cuenta que el festejo fue en Farra.
+const FARRA_LOGO = 'data:image/png;base64,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';
+const FARRA_IG_URL = 'https://www.instagram.com/_farra.__/';
+const FARRA_NIGHT_LINES = [
+  'Dicen que anduvo por Farra el fin de semana.',
+  'Cuentan que se lo/la cruzó por Farra, ya de noche.',
+  'Rumores de una noche en Farra después del partido.',
+];
+const FARRA_CELEBRATION_LINES = [
+  'Festejó el título por todo lo alto en Farra.',
+  'La noche de campeón terminó en Farra.',
+  'Después de este título, la fiesta fue en Farra.',
+];
+function farraNightLine(){ return FARRA_NIGHT_LINES[Math.floor(Math.random()*FARRA_NIGHT_LINES.length)]; }
+function farraCelebrationLine(){ return FARRA_CELEBRATION_LINES[Math.floor(Math.random()*FARRA_CELEBRATION_LINES.length)]; }
+function renderFarraTag(text){
+  return `<p class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px;">
+    <img src="${FARRA_LOGO}" alt="Farra" style="height:18px;border-radius:4px;">
+    <a href="${FARRA_IG_URL}" target="_blank" rel="noopener noreferrer" style="color:#888;text-decoration:none;">${text}</a>
+  </p>`;
+}
+// Devuelve el HTML de la mención de Farra que corresponda (o '' si no toca esta vez): solo a
+// partir de los 24 años, y con mucha más chance de aparecer cuando el título es real.
+function maybeFarraLine(edad, wonRealTitle){
+  if(edad < 24) return '';
+  if(wonRealTitle && Math.random() < 0.7) return renderFarraTag(farraCelebrationLine());
+  if(!wonRealTitle && Math.random() < 0.2) return renderFarraTag(farraNightLine());
+  return '';
 }
 
 /* ================= HELPERS ================= */
@@ -623,10 +731,11 @@ function baseStrengthAdult(tier){ return 78 - tier*7; }
 // la serie que terminaba siempre en Copa de Bronce. Se baja a 55 para que haya variedad real desde
 // el arranque y una progresión creíble a medida que el jugador crece.
 const BASE_STRENGTH_JUVENIL = 55;
+// El valor de mercado se expresa en hamburguesas de BURGER TIME (sponsor), no en dinero.
 function marketValue(ovr){
   const raw = Math.round(Math.pow(ovr,3)/900);
-  if(raw>=1000) return '€'+(raw/1000).toFixed(1)+'M';
-  return '€'+Math.max(50,raw)+'K';
+  if(raw>=1000) return '🍔'+(raw/1000).toFixed(1)+'M';
+  return '🍔'+Math.max(50,raw)+'K';
 }
 
 /* ---------- Atributos ---------- */
@@ -1877,29 +1986,23 @@ function buildCareerCardCanvas(){
   // getVcpLogoImg / getPsLogoImg / INIT), para no romper el gesto sincrónico de compartir en celular.
   const vcpImg = getVcpLogoImg();
   const psImg = getPsLogoImg();
+  const btImg = getBtLogoImg();
   ctx.textAlign='right';
   ctx.font='600 11px Arial'; ctx.fillStyle=t.muted;
-  ctx.fillText('Sponsors: VCP 👕 · Punto Sano 🥗', cardX+cardW-46, footerY+4);
+  ctx.fillText('Sponsors: VCP 👕 · Punto Sano 🥗 · Burger Time 🍔', cardX+cardW-46, footerY+4);
   let logoCursorX = cardX+cardW-46;
-  if(vcpImg && vcpImg.complete && vcpImg.naturalWidth>0){
-    const logoH = 26, logoW = Math.round(logoH * (vcpImg.naturalWidth/vcpImg.naturalHeight));
-    logoCursorX -= logoW;
-    ctx.save();
-    shareDrawRounded(ctx, logoCursorX, footerY+3, logoW, logoH, 5);
-    ctx.clip();
-    ctx.drawImage(vcpImg, logoCursorX, footerY+3, logoW, logoH);
-    ctx.restore();
-    logoCursorX -= 10;
-  }
-  if(psImg && psImg.complete && psImg.naturalWidth>0){
-    const logoH = 26, logoW = Math.round(logoH * (psImg.naturalWidth/psImg.naturalHeight));
-    logoCursorX -= logoW;
-    ctx.save();
-    shareDrawRounded(ctx, logoCursorX, footerY+3, logoW, logoH, 5);
-    ctx.clip();
-    ctx.drawImage(psImg, logoCursorX, footerY+3, logoW, logoH);
-    ctx.restore();
-  }
+  [vcpImg, psImg, btImg].forEach((img)=>{
+    if(img && img.complete && img.naturalWidth>0){
+      const logoH = 26, logoW = Math.round(logoH * (img.naturalWidth/img.naturalHeight));
+      logoCursorX -= logoW;
+      ctx.save();
+      shareDrawRounded(ctx, logoCursorX, footerY+3, logoW, logoH, 5);
+      ctx.clip();
+      ctx.drawImage(img, logoCursorX, footerY+3, logoW, logoH);
+      ctx.restore();
+      logoCursorX -= 10;
+    }
+  });
 
   return canvas;
 }
@@ -1926,7 +2029,7 @@ function shareCareerCard(){
   try{
     const canvas = buildCareerCardCanvas();
     const dataURL = canvas.toDataURL('image/png');
-    const shareText = 'Esta fue mi carrera en la Liga ⚽🎓 Intentá con la tuya:\n'+location.href+'\n\n👕 Con el aguante de VCP: '+VCP_URL+'\n🥗 Y las pilas de PUNTO SANO: '+PS_URL;
+    const shareText = 'Esta fue mi carrera en la Liga ⚽🎓 Intentá con la tuya:\n'+location.href+'\n\n👕 Con el aguante de VCP: '+VCP_URL+'\n🥗 Y las pilas de PUNTO SANO: '+PS_URL+'\n🍔 Y el aguante de BURGER TIME: '+BT_URL;
     let handled = false;
     if(navigator.share){
       const blob = shareDataURLtoBlob(dataURL);
@@ -2046,9 +2149,10 @@ function renderHome(){
     <button class="btn secondary" onclick="openRules()">Ver Detalles de la Liga</button>
     <button class="btn secondary" data-action="viewLeaderboard">🏆 Top 3 histórico</button>
   </div>
-  <div class="grid2" style="margin-top:18px;align-items:start;">
+  <div class="grid3" style="margin-top:18px;align-items:start;">
     ${renderVcpInfo()}
     ${renderPsInfo()}
+    ${renderBtInfo()}
   </div>
   `;
 }
@@ -2319,6 +2423,14 @@ function igBuildPost(p){
     ];
     comments.push(psComments[Math.floor(Math.random()*psComments.length)]);
   }
+  if(isChamp && Math.random()<0.5){
+    const btComments = [
+      '🍔 Este título se festeja con una de @burgertimeuy.',
+      '🍔 BURGER TIME invita, ¿o no? Bien merecido el título.',
+      'Nada como una hamburguesa de BURGER TIME para cerrar el año 🔥',
+    ];
+    comments.push(btComments[Math.floor(Math.random()*btComments.length)]);
+  }
   return { caption, comments };
 }
 function renderInstagram(){
@@ -2396,6 +2508,7 @@ function renderResult(){
   <div class="card">
     ${trophyBlocks}
     ${wonRealTitle ? `<p class="muted" style="font-size:12.5px;">${sponsorChampionLine()}</p>` : ''}
+    ${maybeFarraLine(h.edad, wonRealTitle)}
     ${h.lostSeason
       ? `<p>✈️ Te fuiste de intercambio académico: no jugaste ni un partido esta temporada con <strong>${p.club}</strong>.</p>`
       : `<p>Terminaste <strong>${h.posFinal}º</strong> en ${h.tierLabel} con <strong>${p.club}</strong>.</p>`}
@@ -3012,7 +3125,7 @@ state = newState();
 render();
 setupFeedbackUI();
 loadCareerCount();
-getVcpLogoImg(); getPsLogoImg(); // precarga temprana de los logos de los sponsors para el share card
+getVcpLogoImg(); getPsLogoImg(); getBtLogoImg(); // precarga temprana de los logos de los sponsors para el share card
 </script>
 </body>
 </html>
